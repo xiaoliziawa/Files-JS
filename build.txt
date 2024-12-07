@@ -1,6 +1,6 @@
 # Mod Info
 enable_annotation=false
-mod_version = 0.0.0
+mod_version = 1.0.0
 formal_version = false
 
 kubejs_version=2001.6.4-build.120
@@ -24,12 +24,12 @@ architectury_version=9.1.12
 mixin_extras_version=0.2.0-beta.8
 
 # Persistent mod info
-mod_id=exampleaddon
-archive_name=CrychicTeam
+mod_id=filesjs
+archive_name=Files JS
 mod_name=modname
 mod_description=Example mod description.\nNewline characters can be used and will be replaced properly.
-mod_authors=CrychicTeam
-mod_license=All Rights Reserved
+mod_authors=PrizOwO
+mod_license=MIT
 mod_credits=None
 issue_tracker_url=https://github.com/dragon-forge/HammerLib/issues
 
