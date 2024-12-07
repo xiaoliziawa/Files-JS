@@ -1,0 +1,320 @@
+buildscript {
+    repositories {
+        maven { url = 'https://maven.minecraftforge.net' }
+        maven { url = 'https://maven.architectury.dev/' }
+        maven { url = 'https://maven.fabricmc.net/' }
+        maven { url = "https://maven.neoforged.net/releases/" }
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'org.spongepowered:mixingradle:0.7.+'
+        classpath 'com.google.code.gson:gson:2.8.9'
+    }
+}
+
+plugins {
+    id "dev.architectury.loom" version "1.4-SNAPSHOT"
+    id 'maven-publish'
+}
+
+apply plugin: 'idea'
+
+configurations.all {
+    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+        if (details.requested.group == 'com.google.code.gson' && details.requested.name == 'gson') {
+            details.useVersion '2.8.9'
+            details.because 'Avoid Gson reflection issues'
+        }
+    }
+}
+
+// Load properties from build.txt
+ext.configFile = file("build.txt")
+configFile.withReader {
+    def prop = new Properties()
+    prop.load(it)
+    project.ext.config = new ConfigSlurper().parse(prop)
+    project.ext.hasConfig = { key ->
+        return config.isSet(key)
+    }
+}
+
+version = config.mod_version
+group = config.maven_group
+base {
+    archivesName = "${config.archive_name}-${config.mc_version}"
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(17)
+    withSourcesJar()
+}
+
+loom {
+    silentMojangMappingsLicense()
+
+    runs {
+        client {
+            client()
+            setConfigName("Minecraft Client")
+            ideConfigGenerated(true)
+            runDir("run")
+        }
+        server {
+            server()
+            setConfigName("Minecraft Server")
+            ideConfigGenerated(true)
+            runDir("run")
+        }
+    }
+
+    forge {
+        mixinConfigs = [
+                "mixins.${config.mod_id}.json"
+        ]
+    }
+}
+
+repositories {
+    maven {
+        name = "Architectury"
+        url = "https://maven.architectury.dev"
+        content {
+            includeGroup "dev.architectury"
+        }
+    }
+
+    maven {
+        name "neoforgedReleases"
+        url "https://maven.neoforged.net/releases"
+    }
+
+    maven {
+        name = "Lat's Maven"
+        url = "https://maven.saps.dev/minecraft"
+        content {
+            includeGroup "dev.latvian.mods"
+        }
+    }
+
+    maven {
+        name = "Curseforge"
+        url = "https://cursemaven.com"
+        content {
+            includeGroup "curse.maven"
+        }
+    }
+
+    maven {
+        name = 'ParchmentMC'
+        url = 'https://maven.parchmentmc.org'
+    }
+    maven {
+        name = 'tterrag'
+        url = 'https://maven.tterrag.com/'
+    }
+    maven {
+        name = 'GeckoLib'
+        url 'https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/'
+        content {
+            includeGroupByRegex("software\\.bernie.*")
+            includeGroup("com.eliotlash.mclib")
+        }
+    }
+    maven {
+        url = "https://maven.theillusivec4.top/"
+    }
+    maven {
+        name "KosmX's maven"
+        url 'https://maven.kosmx.dev/'
+    }
+    flatDir { dirs "libraries/${config.mc_version}/all" }
+    flatDir { dirs "libraries/${config.mc_version}/classpathOnly" }
+    flatDir { dirs "libraries/${config.mc_version}/runtimeOnly" }
+    flatDir { dirs "libraries/embedded" }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${config.mc_version}"
+    mappings loom.layered() {
+        officialMojangMappings()
+        parchment("org.parchmentmc.data:parchment-1.20.1:2023.09.03@zip")
+    }
+//    forge "net.minecraftforge:forge:${config.mc_version}-${config.forge_version}"
+    forge("net.neoforged:forge:${config.mc_version}-${config.forge_version}")
+    // KubeJS dependencies
+    modImplementation("dev.latvian.mods:kubejs-forge:${config.kubejs_version}")
+    modRuntimeOnly("dev.latvian.mods:rhino-forge:${config.rhino_version}")
+    modRuntimeOnly("dev.architectury:architectury-forge:${config.architectury_version}")
+
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+
+    compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:0.3.2"))
+    implementation(include("io.github.llamalad7:mixinextras-forge:0.3.2"))
+
+    if (hasConfig("jei_version") && !config.jei_version.isEmpty()) {
+        modCompileOnly("mezz.jei:jei-${config.mc_version}-common-api:${config.jei_version}")
+        modCompileOnly("mezz.jei:jei-${config.mc_version}-forge-api:${config.jei_version}")
+        modRuntimeOnly("mezz.jei:jei-${config.mc_version}-forge:${config.jei_version}")
+    }
+
+    if (hasConfig("geckolib_version") && !config.geckolib_version.isEmpty()) {
+        modImplementation("software.bernie.geckolib:geckolib-neoforge-${config.mc_version}:${config.geckolib_version}")
+        modImplementation("com.eliotlash.mclib:mclib:20")
+    }
+
+    if (hasConfig("curios_version") && !config.curios_version.isEmpty()) {
+        modImplementation("top.theillusivec4.curios:curios-forge:${config.curios_version}")
+        modRuntimeOnly("top.theillusivec4.curios:curios-forge:${config.curios_version}")
+    }
+
+    if (hasConfig("playeranimator_version") && !config.playeranimator_version.isEmpty()) {
+        modImplementation("dev.kosmx.player-anim:player-animation-lib-forge:${config.playeranimator_version}")
+        modRuntimeOnly("io.github.kosmx.bendy-lib:bendy-lib-forge:${config.bendylib_version}")
+    }
+
+    // Dynamic library loading
+    def libraries = new File(file("libraries"), "${config.mc_version}")
+    if (!libraries.isDirectory()) libraries.mkdirs()
+
+    // All libraries
+    def libDir = new File(libraries, "all")
+    if (libDir.isDirectory()) {
+        libDir.eachFile { file ->
+            def splitPos = file.name.lastIndexOf("-")
+            def modartifact = file.name.substring(0, splitPos)
+            def modversion = file.name.substring(splitPos + 1, file.name.length() - 4)
+            modImplementation(project.dependencies.create("_all:$modartifact:$modversion") {
+                transitive = false
+            })
+        }
+    } else libDir.mkdir()
+
+    // Classpath only libraries
+    libDir = new File(libraries, "classpathOnly")
+    if (libDir.isDirectory()) {
+        libDir.eachFile { file ->
+            def splitPos = file.name.lastIndexOf("-")
+            def modartifact = file.name.substring(0, splitPos)
+            def modversion = file.name.substring(splitPos + 1, file.name.length() - 4)
+            modCompileOnly(project.dependencies.create("_classpath:$modartifact:$modversion") {
+                transitive = false
+            })
+        }
+    } else libDir.mkdir()
+
+    // Runtime only libraries
+    libDir = new File(libraries, "runtimeOnly")
+    if (libDir.isDirectory()) {
+        libDir.eachFile { file ->
+            def splitPos = file.name.lastIndexOf("-")
+            def modartifact = file.name.substring(0, splitPos)
+            def modversion = file.name.substring(splitPos + 1, file.name.length() - 4)
+            modRuntimeOnly(project.dependencies.create("_runtime:$modartifact:$modversion") {
+                transitive = false
+            })
+        }
+    } else libDir.mkdir()
+
+    // Embedded libraries
+    libDir = new File(file("libraries"), "embedded")
+    if (libDir.isDirectory()) {
+        libDir.eachFile { file ->
+            def splitPos = file.name.lastIndexOf("-")
+            def modartifact = file.name.substring(0, splitPos)
+            def modversion = file.name.substring(splitPos + 1, file.name.length() - 4)
+            implementation(include(project.dependencies.create("lib:$modartifact:$modversion") {
+                transitive = false
+            }))
+        }
+    } else libDir.mkdir()
+}
+
+processResources {
+    def resourceTargets = ['META-INF/mods.toml', 'pack.mcmeta']
+    def replaceProperties = [
+            version: config.mod_version,
+            mod_version: config.mod_version,
+            minecraft_version: config.mc_version,
+            minecraft_version_range: config.mc_range,
+            forge_version: config.forge_version,
+            forge_version_range: config.forge_range,
+            loader_version_range: config.forge_range,
+            mod_id: config.mod_id,
+            mod_name: config.mod_name,
+            mod_license: config.mod_license,
+            mod_authors: config.mod_authors,
+            mod_description: config.mod_description?.replace("\\n", "\n"),
+            issue_tracker: config.issue_tracker_url,
+            kubejs_version: config.kubejs_version,
+            architectury_version: config.architectury_version,
+    ]
+
+    inputs.properties replaceProperties
+    filesMatching(resourceTargets) {
+        expand replaceProperties
+    }
+}
+
+jar {
+    manifest {
+        attributes([
+                "Specification-Title": config.mod_id,
+                "Specification-Vendor": config.mod_authors,
+                "Specification-Version": "1",
+                "Implementation-Title": project.name,
+                "Implementation-Version": version,
+                "Implementation-Vendor": config.mod_authors,
+                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),
+                "MixinConfigs": "mixins.${config.mod_id}.json"
+        ])
+    }
+}
+
+// Optional: Build number incrementing
+import java.nio.file.Files
+
+def incrementBuild = {
+    if (hasConfig("formal_version") && Boolean.parseBoolean(config.formal_version)) {
+        def buildTxt = configFile.toPath()
+        List<String> lines = Files.readAllLines(buildTxt)
+        lines.replaceAll { String ln ->
+            if (ln.startsWith("mod_version")) {
+                def version = ln.split("=")[1]
+                def dot = version.lastIndexOf('.') + 1
+                def newVersion = version.substring(0, dot)
+                def lastOne = Integer.parseInt(version.substring(dot)) + 1
+                return "mod_version=" + newVersion + lastOne
+            }
+            return ln
+        }
+        Files.write(buildTxt, lines, java.nio.file.StandardOpenOption.CREATE)
+    }
+}
+
+tasks.register("incrementBuildVersion") {
+    group "build"
+    doLast incrementBuild
+}
+
+tasks.build.dependsOn tasks.incrementBuildVersion
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
+
+    repositories {
+        if (hasConfig("maven_url") && !config.maven_url.isEmpty()) {
+            maven {
+                url config.maven_url
+            }
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}

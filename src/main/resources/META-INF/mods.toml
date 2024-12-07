@@ -1,0 +1,38 @@
+modLoader = "javafml"
+loaderVersion = "[47,)"
+license = "All rights reserved" # https://choosealicense.com/
+
+
+# issueTrackerURL="https://github.com/invalid/pleasechangeme/issues"
+
+[[mods]]
+modId = "exampleaddon"
+version = "${version}"
+displayName = "Example Addon"
+logoFile="icon.png"
+# credits="Thanks to FooterMan for the KubeJS Addon Template!"
+# authors="YourNameHere"
+description = '''
+Example KubeJS Addon.
+'''
+
+[[dependencies.exampleaddon]]
+modId = "forge"
+mandatory = true
+versionRange = "[47,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.exampleaddon]]
+modId = "minecraft"
+mandatory = true
+versionRange = "[1.20.1,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.exampleaddon]]
+modId = "kubejs"
+mandatory = true
+versionRange = "[2001.6.4,)"
+ordering = "NONE"
+side = "BOTH"
