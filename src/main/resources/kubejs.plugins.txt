@@ -1,1 +1,1 @@
-kubejs.net.prizowo.filejs.ExampleKubeJSPlugin
+net.prizowo.filejs.FilesJSPlugin
