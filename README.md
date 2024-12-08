@@ -232,6 +232,7 @@ Files.fileContentChangedSignificantly(event => {
 - .toml
 - .properties
 - .backup
+- 。。。还有很多
 
 ### 安全措施
 - 禁止访问Minecraft实例目录之外的文件
@@ -241,6 +242,7 @@ Files.fileContentChangedSignificantly(event => {
 - 文件大小限制检查
 - 文件类型验证
 - 路径安全性检查
+- 文件拓展名验证
 
 ## 错误处理
 
