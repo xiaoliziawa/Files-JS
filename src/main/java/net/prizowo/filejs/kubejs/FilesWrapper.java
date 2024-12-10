@@ -27,20 +27,69 @@ import java.util.zip.ZipOutputStream;
 
 public class FilesWrapper {
     private Path validateAndNormalizePath(String path) throws SecurityException {
-        Path minecraftDir = FileAccessManager.getMinecraftDir();
-        
-        Path inputPath = Paths.get(path).normalize();
-        
-        if (inputPath.isAbsolute()) {
-            if (!inputPath.startsWith(minecraftDir)) {
-                throw new SecurityException("Access denied: Cannot access files outside Minecraft instance directory: " + path);
-            }
-            path = minecraftDir.relativize(inputPath).toString().replace('\\', '/');
+        if (path == null || path.trim().isEmpty()) {
+            throw new SecurityException("Access denied: Empty path");
         }
         
-        FileAccessManager.validateFileAccess(path);
+        Path minecraftDir = FileAccessManager.getMinecraftDir().normalize().toAbsolutePath();
         
-        return minecraftDir.resolve(path).normalize();
+        path = path.replace('\\', '/').trim();
+        
+        if (path.contains(":") || path.startsWith("/") || path.startsWith("\\") ||
+            path.contains("../") || path.contains("..\\") || 
+            path.contains("./") || path.contains(".\\") ||
+            path.contains("|") || path.contains("*") || path.contains("?") ||
+            path.contains("<") || path.contains(">") || path.contains("\"")) {
+            throw new SecurityException("Access denied: Invalid path characters or absolute path detected: " + path);
+        }
+        
+        Path resolvedPath;
+        try {
+            resolvedPath = minecraftDir.resolve(path).normalize().toAbsolutePath();
+            if (!resolvedPath.startsWith(minecraftDir)) {
+                throw new SecurityException("Access denied: Path escapes Minecraft directory: " + path);
+            }
+        } catch (Exception e) {
+            throw new SecurityException("Access denied: Invalid path format: " + path);
+        }
+        
+        String relativePathStr;
+        try {
+            relativePathStr = minecraftDir.relativize(resolvedPath).toString().replace('\\', '/');
+        } catch (Exception e) {
+            throw new SecurityException("Access denied: Cannot relativize path: " + path);
+        }
+        
+        String firstDir = relativePathStr.split("/")[0];
+        if (!FileAccessManager.ALLOWED_SUBDIRS.contains(firstDir)) {
+            throw new SecurityException("Access denied: Directory not allowed: " + firstDir);
+        }
+        
+        if (!Files.isDirectory(resolvedPath)) {
+            if (!relativePathStr.startsWith("kubejs/backups/")) {
+                String extension = getFileExtension(relativePathStr);
+                if (!FileAccessManager.ALLOWED_EXTENSIONS.contains(extension.toLowerCase())) {
+                    throw new SecurityException("Access denied: File type not allowed: " + extension);
+                }
+            }
+        }
+        
+        try {
+            if (Files.exists(resolvedPath) && Files.isSymbolicLink(resolvedPath)) {
+                throw new SecurityException("Access denied: Symbolic links not allowed: " + path);
+            }
+        } catch (SecurityException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new SecurityException("Access denied: Error checking path: " + path);
+        }
+        
+        return resolvedPath;
+    }
+
+    private static String getFileExtension(String path) {
+        int lastDot = path.lastIndexOf('.');
+        return lastDot > 0 ? path.substring(lastDot).toLowerCase() : "";
     }
 
     public String readFile(String path) {
@@ -130,7 +179,7 @@ public class FilesWrapper {
             return Files.exists(normalizedPath);
         } catch (SecurityException e) {
             Filesjs.LOGGER.error("Security violation in exists check: " + path, e);
-            return false;
+            throw e;
         }
     }
 
@@ -183,15 +232,56 @@ public class FilesWrapper {
     public List<String> listFiles(String path) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
+            if (!Files.isDirectory(normalizedPath)) {
+                throw new SecurityException("Access denied: Path is not a directory: " + path);
+            }
+            
             return Files.list(normalizedPath)
-                    .map(Path::toString)
-                    .collect(Collectors.toList());
+                .filter(p -> {
+                    try {
+                        validateAndNormalizePath(p.toString());
+                        return Files.isRegularFile(p);
+                    } catch (SecurityException e) {
+                        Filesjs.LOGGER.warn("Skipping unsafe file in listing: " + p);
+                        return false;
+                    }
+                })
+                .map(Path::toString)
+                .collect(Collectors.toList());
         } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in listing files: " + path, e);
+            Filesjs.LOGGER.error("Security violation in list operation: " + path, e);
             throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error listing files: " + path, e);
             throw new RuntimeException("Failed to list files: " + path, e);
+        }
+    }
+
+    public List<String> listDirectories(String path) {
+        try {
+            Path normalizedPath = validateAndNormalizePath(path);
+            if (!Files.isDirectory(normalizedPath)) {
+                throw new SecurityException("Access denied: Path is not a directory: " + path);
+            }
+            
+            return Files.list(normalizedPath)
+                .filter(p -> {
+                    try {
+                        validateAndNormalizePath(p.toString());
+                        return Files.isDirectory(p);
+                    } catch (SecurityException e) {
+                        Filesjs.LOGGER.warn("Skipping unsafe directory in listing: " + p);
+                        return false;
+                    }
+                })
+                .map(Path::toString)
+                .collect(Collectors.toList());
+        } catch (SecurityException e) {
+            Filesjs.LOGGER.error("Security violation in list operation: " + path, e);
+            throw e;
+        } catch (IOException e) {
+            Filesjs.LOGGER.error("Error listing directories: " + path, e);
+            throw new RuntimeException("Failed to list directories: " + path, e);
         }
     }
 
@@ -257,9 +347,8 @@ public class FilesWrapper {
     public void ensureDirectoryExists(String path) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
-            Path dirPath = normalizedPath.getParent();
-            if (dirPath != null && !Files.exists(dirPath)) {
-                Files.createDirectories(dirPath);
+            if (!Files.exists(normalizedPath)) {
+                Files.createDirectories(normalizedPath);
             }
         } catch (SecurityException e) {
             Filesjs.LOGGER.error("Security violation in directory creation: " + path, e);
@@ -273,8 +362,14 @@ public class FilesWrapper {
     public void saveJson(String path, String jsonContent) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
-            ensureDirectoryExists(normalizedPath.toString());
-            writeFile(normalizedPath.toString(), jsonContent);
+            
+            Path parent = normalizedPath.getParent();
+            if (parent != null) {
+                String parentPath = FileAccessManager.getMinecraftDir().relativize(parent).toString().replace('\\', '/');
+                ensureDirectoryExists(parentPath);
+            }
+            
+            writeFile(path, jsonContent);
         } catch (SecurityException e) {
             Filesjs.LOGGER.error("Security violation in JSON save: " + path, e);
             throw e;
@@ -291,6 +386,13 @@ public class FilesWrapper {
             }
 
             Path normalizedPath = validateAndNormalizePath(path);
+            
+            Path parent = normalizedPath.getParent();
+            if (parent != null) {
+                String parentPath = FileAccessManager.getMinecraftDir().relativize(parent).toString().replace('\\', '/');
+                ensureDirectoryExists(parentPath);
+            }
+
             String formattedScript = String.format(
                     "// Generated by FilesJS\n" +
                     "// Created at: %s\n\n" +
@@ -299,8 +401,8 @@ public class FilesWrapper {
                     scriptContent
             );
 
-            ensureDirectoryExists(normalizedPath.toString());
-            writeFile(normalizedPath.toString(), formattedScript);
+            // 写入脚本内容
+            writeFile(path, formattedScript);
         } catch (SecurityException e) {
             Filesjs.LOGGER.error("Security violation in script save: " + path, e);
             throw e;
@@ -438,7 +540,6 @@ public class FilesWrapper {
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
             String backupName = sourcePath.getFileName().toString() + "." + timestamp + ".backup";
             
-            // 确保备目录存在且安全
             Path backupDir = Paths.get("kubejs/backups");
             Path backupPath = backupDir.resolve(backupName);
             validateAndNormalizePath(backupPath.toString());
@@ -561,31 +662,48 @@ public class FilesWrapper {
         try {
             Path normalizedPath1 = validateAndNormalizePath(path1);
             Path normalizedPath2 = validateAndNormalizePath(path2);
+
+            // 先检查文件是否存在
+            if (!Files.exists(normalizedPath1)) {
+                throw new IOException("First file does not exist: " + path1);
+            }
+            if (!Files.exists(normalizedPath2)) {
+                throw new IOException("Second file does not exist: " + path2);
+            }
+
             return Arrays.equals(
-                    Files.readAllBytes(normalizedPath1),
-                    Files.readAllBytes(normalizedPath2)
+                Files.readAllBytes(normalizedPath1),
+                Files.readAllBytes(normalizedPath2)
             );
         } catch (SecurityException e) {
             Filesjs.LOGGER.error("Security violation in file comparison: " + path1 + " vs " + path2, e);
             throw e;
         } catch (IOException e) {
-            Filesjs.LOGGER.error("Error comparing files", e);
+            Filesjs.LOGGER.error("Error comparing files: " + path1 + " vs " + path2, e);
             throw new RuntimeException("Failed to compare files", e);
         }
     }
 
     public void createZip(String sourcePath, String zipPath) {
         try {
-            Path source = validateAndNormalizePath(sourcePath);
+            Path source = validateZipPath(sourcePath);
             Path zip = validateAndNormalizePath(zipPath);
+
+            if (!Files.exists(source)) {
+                throw new IOException("Source directory does not exist: " + sourcePath);
+            }
+
+            Path zipParent = zip.getParent();
+            if (zipParent != null) {
+                Files.createDirectories(zipParent);
+            }
 
             try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zip))) {
                 Files.walk(source)
                     .filter(path -> {
                         try {
-                            // 对zip内的每个文件也进行安全检查
-                            validateAndNormalizePath(path.toString());
-                            return !Files.isDirectory(path);
+                            FileAccessManager.validateZipAccess(path.toString());
+                            return true;
                         } catch (SecurityException e) {
                             Filesjs.LOGGER.warn("Skipping unsafe path in zip: " + path);
                             return false;
@@ -593,9 +711,14 @@ public class FilesWrapper {
                     })
                     .forEach(path -> {
                         try {
-                            String relativePath = source.relativize(path).toString();
+                            String relativePath = source.relativize(path).toString().replace('\\', '/');
+                            if (Files.isDirectory(path)) {
+                                relativePath += "/";
+                            }
                             zos.putNextEntry(new ZipEntry(relativePath));
-                            Files.copy(path, zos);
+                            if (!Files.isDirectory(path)) {
+                                Files.copy(path, zos);
+                            }
                             zos.closeEntry();
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);
@@ -608,6 +731,14 @@ public class FilesWrapper {
         } catch (IOException | UncheckedIOException e) {
             Filesjs.LOGGER.error("Error creating zip file: " + zipPath, e);
             throw new RuntimeException("Failed to create zip file: " + zipPath, e);
+        }
+    }
+
+    private Path validateZipPath(String path) throws SecurityException {
+        try {
+            return Paths.get(FileAccessManager.getMinecraftDir().toString(), path).normalize();
+        } catch (Exception e) {
+            throw new SecurityException("Invalid path: " + path);
         }
     }
 
@@ -684,7 +815,7 @@ public class FilesWrapper {
 
     private void triggerAccessDenied(String path, String operation, ServerPlayer player) {
         try {
-            Path normalizedPath = Paths.get(path).normalize();
+            Path normalizedPath = validateAndNormalizePath(path);
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             ServerLevel level = server.overworld();
             FilesJSPlugin.FILE_ACCESS_DENIED.post(new FileEventJS(
@@ -696,7 +827,7 @@ public class FilesWrapper {
                 level
             ));
             
-            Filesjs.LOGGER.warn("Access denied: Player {} attempted {} operation on {}",
+            Filesjs.LOGGER.warn("Access denied: Player {} attempted {} operation on {}", 
                 player != null ? player.getName().getString() : "Unknown",
                 operation,
                 normalizedPath
@@ -731,19 +862,33 @@ public class FilesWrapper {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
             
-            watchDirectory(path, changedPath -> {
+            Path parentDir = normalizedPath.getParent();
+            if (parentDir == null) {
+                throw new SecurityException("Invalid file path: " + path);
+            }
+            
+            Path fileName = normalizedPath.getFileName();
+            
+            String relativeParentDir = FileAccessManager.getMinecraftDir()
+                .relativize(parentDir)
+                .toString()
+                .replace('\\', '/');
+            
+            watchDirectory(relativeParentDir, changedPath -> {
                 try {
-                    if (Files.size(changedPath) > threshold) {
-                        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-                        ServerLevel level = server.overworld();
-                        FilesJSPlugin.FILE_SIZE_THRESHOLD.post(new FileEventJS(
-                            path,
-                            String.valueOf(Files.size(changedPath)),
-                            "size_threshold",
-                            null,
-                            server,
-                            level
-                        ));
+                    if (changedPath.getFileName().equals(fileName) && Files.exists(changedPath)) {
+                        if (Files.size(changedPath) > threshold) {
+                            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+                            ServerLevel level = server.overworld();
+                            FilesJSPlugin.FILE_SIZE_THRESHOLD.post(new FileEventJS(
+                                path,
+                                String.valueOf(Files.size(changedPath)),
+                                "size_threshold",
+                                null,
+                                server,
+                                level
+                            ));
+                        }
                     }
                 } catch (IOException e) {
                     Filesjs.LOGGER.error("Error checking file size: " + path, e);
@@ -791,23 +936,37 @@ public class FilesWrapper {
     public void watchContentChanges(String path, double threshold) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
+            
+            Path parentDir = normalizedPath.getParent();
+            if (parentDir == null) {
+                throw new SecurityException("Invalid file path: " + path);
+            }
+            Path fileName = normalizedPath.getFileName();
+            
             String originalContent = new String(Files.readAllBytes(normalizedPath), StandardCharsets.UTF_8);
             
-            watchDirectory(path, changedPath -> {
+            String relativeParentDir = FileAccessManager.getMinecraftDir()
+                .relativize(parentDir)
+                .toString()
+                .replace('\\', '/');
+            
+            watchDirectory(relativeParentDir, changedPath -> {
                 try {
-                    String newContent = new String(Files.readAllBytes(changedPath), StandardCharsets.UTF_8);
-                    double similarity = calculateSimilarity(originalContent, newContent);
-                    if (1.0 - similarity > threshold) {
-                        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-                        ServerLevel level = server.overworld();
-                        FilesJSPlugin.FILE_CONTENT_CHANGED_SIGNIFICANTLY.post(new FileEventJS(
-                            path,
-                            newContent,
-                            "content_changed_significantly",
-                            null,
-                            server,
-                            level
-                        ));
+                    if (changedPath.getFileName().equals(fileName) && Files.exists(changedPath)) {
+                        String newContent = new String(Files.readAllBytes(changedPath), StandardCharsets.UTF_8);
+                        double similarity = calculateSimilarity(originalContent, newContent);
+                        if (1.0 - similarity > threshold) {
+                            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+                            ServerLevel level = server.overworld();
+                            FilesJSPlugin.FILE_CONTENT_CHANGED_SIGNIFICANTLY.post(new FileEventJS(
+                                path,
+                                newContent,
+                                "content_changed_significantly",
+                                null,
+                                server,
+                                level
+                            ));
+                        }
                     }
                 } catch (IOException e) {
                     Filesjs.LOGGER.error("Error checking content changes: " + path, e);
@@ -972,9 +1131,10 @@ public class FilesWrapper {
 
     private FileEventJS createFileEvent(String path, String content, String type) {
         try {
+            Path normalizedPath = validateAndNormalizePath(path);
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             ServerLevel level = server.overworld();
-            return new FileEventJS(path, content, type, null, server, level);
+            return new FileEventJS(normalizedPath.toString(), content, type, null, server, level);
         } catch (SecurityException e) {
             Filesjs.LOGGER.error("Security violation creating event: " + path, e);
             throw e;

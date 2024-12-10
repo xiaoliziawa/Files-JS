@@ -21,7 +21,7 @@ public class FileAccessManager {
             "screenshots"
     ));
 
-    private static final Set<String> ALLOWED_EXTENSIONS = new HashSet<>(Arrays.asList(
+    public static final Set<String> ALLOWED_EXTENSIONS = new HashSet<>(Arrays.asList(
             ".json",     // JSON
             ".toml",     // TOML
             ".properties", // Properties
@@ -50,14 +50,12 @@ public class FileAccessManager {
     public static void validateFileAccess(String path) throws SecurityException {
         Path minecraftDir = getMinecraftDir().normalize().toAbsolutePath();
         
-        // 1. 预处理路径
         if (path == null || path.trim().isEmpty()) {
             throw new SecurityException("Access denied: Empty path");
         }
         path = path.replace('\\', '/').trim();
         
-        // 2. 检查危险字符和模式
-        if (path.contains("../") || path.contains("..\\") || 
+        if (path.contains("../") || path.contains("..\\") ||
             path.contains(":") || path.startsWith("/") || path.startsWith("\\") ||
             path.contains("./") || path.contains(".\\") ||
             path.contains("|") || path.contains("*") || path.contains("?") ||
@@ -65,7 +63,6 @@ public class FileAccessManager {
             throw new SecurityException("Access denied: Invalid path characters detected: " + path);
         }
         
-        // 3. 规范化路径并进行严格检查
         Path normalizedPath;
         try {
             normalizedPath = minecraftDir.resolve(path).normalize().toAbsolutePath();
@@ -73,12 +70,10 @@ public class FileAccessManager {
             throw new SecurityException("Access denied: Invalid path format: " + path);
         }
 
-        // 4. 确保路径在 Minecraft 目录内
         if (!normalizedPath.startsWith(minecraftDir)) {
             throw new SecurityException("Access denied: Path escapes Minecraft directory: " + path);
         }
         
-        // 5. 获取并检查相对路径
         String relativePathStr;
         try {
             relativePathStr = minecraftDir.relativize(normalizedPath).toString().replace('\\', '/');
@@ -86,15 +81,16 @@ public class FileAccessManager {
             throw new SecurityException("Access denied: Cannot relativize path: " + path);
         }
 
-        // 6. 检查目录访问权限
         String firstDir = relativePathStr.split("/")[0];
         if (!ALLOWED_SUBDIRS.contains(firstDir)) {
             throw new SecurityException("Access denied: Directory not allowed: " + firstDir);
         }
 
-        // 7. 检查文件扩展名（对非目录文件）
-        if (!Files.isDirectory(normalizedPath)) {
-            // 特殊处理 kubejs/backups 目录
+        if (Files.exists(normalizedPath) && Files.isDirectory(normalizedPath)) {
+            return;
+        }
+
+        if (!Files.exists(normalizedPath) || !Files.isDirectory(normalizedPath)) {
             if (!relativePathStr.startsWith("kubejs/backups/")) {
                 String extension = getFileExtension(relativePathStr);
                 if (!ALLOWED_EXTENSIONS.contains(extension.toLowerCase())) {
@@ -103,7 +99,44 @@ public class FileAccessManager {
             }
         }
 
-        // 8. 检查符号链接
+        try {
+            if (Files.exists(normalizedPath) && Files.isSymbolicLink(normalizedPath)) {
+                throw new SecurityException("Access denied: Symbolic links not allowed: " + path);
+            }
+        } catch (SecurityException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new SecurityException("Access denied: Error checking path: " + path);
+        }
+    }
+
+    public static void validateZipAccess(String path) throws SecurityException {
+        Path minecraftDir = getMinecraftDir().normalize().toAbsolutePath();
+        
+        if (path == null || path.trim().isEmpty()) {
+            throw new SecurityException("Access denied: Empty path");
+        }
+        path = path.replace('\\', '/').trim();
+        
+        if (path.contains("../") || path.contains("..\\") ||
+            path.contains(":") || path.startsWith("/") || path.startsWith("\\") ||
+            path.contains("./") || path.contains(".\\") ||
+            path.contains("|") || path.contains("*") || path.contains("?") ||
+            path.contains("<") || path.contains(">") || path.contains("\"")) {
+            throw new SecurityException("Access denied: Invalid path characters detected: " + path);
+        }
+        
+        Path normalizedPath;
+        try {
+            normalizedPath = minecraftDir.resolve(path).normalize().toAbsolutePath();
+        } catch (Exception e) {
+            throw new SecurityException("Access denied: Invalid path format: " + path);
+        }
+
+        if (!normalizedPath.startsWith(minecraftDir)) {
+            throw new SecurityException("Access denied: Path escapes Minecraft directory: " + path);
+        }
+
         try {
             if (Files.exists(normalizedPath) && Files.isSymbolicLink(normalizedPath)) {
                 throw new SecurityException("Access denied: Symbolic links not allowed: " + path);
