@@ -4,9 +4,7 @@ import dev.latvian.mods.kubejs.event.EventJS;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.Arrays;
+import net.prizowo.filejs.security.FileAccessManager;
 
 public class FileEventJS extends EventJS {
     private final String path;
@@ -23,7 +21,6 @@ public class FileEventJS extends EventJS {
 
     private static boolean isPathSafe(String path) {
         try {
-            // 使用 FileAccessManager 进行统一的安全检查
             FileAccessManager.validateFileAccess(path);
             return true;
         } catch (SecurityException e) {

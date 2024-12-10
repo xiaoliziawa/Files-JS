@@ -1,11 +1,9 @@
 package net.prizowo.filejs.security;
 
 import net.minecraftforge.fml.loading.FMLPaths;
-import net.prizowo.filejs.Filesjs;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.Files;
-import java.io.IOException;
 import java.util.*;
 
 public class FileAccessManager {
@@ -45,70 +43,80 @@ public class FileAccessManager {
             ".zip"       // ZIP
     ));
 
-    private static final long MAX_FILE_SIZE = 1024 * 1024 * 10; // 10MB
-
     public static Path getMinecraftDir() {
         return FMLPaths.GAMEDIR.get();
     }
 
     public static void validateFileAccess(String path) throws SecurityException {
-        if (path.startsWith("kubejs/backups/")) {
-            return;
+        Path minecraftDir = getMinecraftDir().normalize().toAbsolutePath();
+        
+        // 1. 预处理路径
+        if (path == null || path.trim().isEmpty()) {
+            throw new SecurityException("Access denied: Empty path");
+        }
+        path = path.replace('\\', '/').trim();
+        
+        // 2. 检查危险字符和模式
+        if (path.contains("../") || path.contains("..\\") || 
+            path.contains(":") || path.startsWith("/") || path.startsWith("\\") ||
+            path.contains("./") || path.contains(".\\") ||
+            path.contains("|") || path.contains("*") || path.contains("?") ||
+            path.contains("<") || path.contains(">") || path.contains("\"")) {
+            throw new SecurityException("Access denied: Invalid path characters detected: " + path);
+        }
+        
+        // 3. 规范化路径并进行严格检查
+        Path normalizedPath;
+        try {
+            normalizedPath = minecraftDir.resolve(path).normalize().toAbsolutePath();
+        } catch (Exception e) {
+            throw new SecurityException("Access denied: Invalid path format: " + path);
         }
 
-        Path minecraftDir = getMinecraftDir();
-        Path normalizedPath = Paths.get(path).normalize();
-        Path absolutePath = normalizedPath.isAbsolute() ? normalizedPath : minecraftDir.resolve(normalizedPath);
-
-        if (!absolutePath.startsWith(minecraftDir)) {
-            throw new SecurityException("Access denied: Cannot access files outside Minecraft instance directory: " + path);
+        // 4. 确保路径在 Minecraft 目录内
+        if (!normalizedPath.startsWith(minecraftDir)) {
+            throw new SecurityException("Access denied: Path escapes Minecraft directory: " + path);
+        }
+        
+        // 5. 获取并检查相对路径
+        String relativePathStr;
+        try {
+            relativePathStr = minecraftDir.relativize(normalizedPath).toString().replace('\\', '/');
+        } catch (Exception e) {
+            throw new SecurityException("Access denied: Cannot relativize path: " + path);
         }
 
-        Path relativePath = minecraftDir.relativize(absolutePath);
-        String relativePathStr = relativePath.toString().replace('\\', '/');
-
-        if (relativePathStr.contains("..")) {
-            throw new SecurityException("Access denied: Parent directory traversal not allowed");
+        // 6. 检查目录访问权限
+        String firstDir = relativePathStr.split("/")[0];
+        if (!ALLOWED_SUBDIRS.contains(firstDir)) {
+            throw new SecurityException("Access denied: Directory not allowed: " + firstDir);
         }
 
-        boolean allowed = ALLOWED_SUBDIRS.stream()
-                .anyMatch(dir -> relativePathStr.startsWith(dir + "/") || relativePathStr.equals(dir));
-
-        if (!allowed) {
-            throw new SecurityException("Access denied: Directory not allowed: " + path + "\nAllowed directories: " + String.join(", ", ALLOWED_SUBDIRS));
-        }
-
-        if (!relativePathStr.startsWith("kubejs/backups/")) {
-            boolean validExtension = ALLOWED_EXTENSIONS.stream()
-                    .anyMatch(ext -> relativePathStr.toLowerCase().endsWith(ext));
-            if (!validExtension && !Files.isDirectory(absolutePath)) {
-                throw new SecurityException("Access denied: File type not allowed: " + path + "\nAllowed extensions: " + String.join(", ", ALLOWED_EXTENSIONS));
+        // 7. 检查文件扩展名（对非目录文件）
+        if (!Files.isDirectory(normalizedPath)) {
+            // 特殊处理 kubejs/backups 目录
+            if (!relativePathStr.startsWith("kubejs/backups/")) {
+                String extension = getFileExtension(relativePathStr);
+                if (!ALLOWED_EXTENSIONS.contains(extension.toLowerCase())) {
+                    throw new SecurityException("Access denied: File type not allowed: " + extension);
+                }
             }
         }
-    }
 
-    public static void validateFileSize(Path path) throws SecurityException, IOException {
-        if (Files.exists(path) && !Files.isDirectory(path) && Files.size(path) > MAX_FILE_SIZE) {
-            throw new SecurityException(String.format("File size exceeds limit (max %.2fMB): %s", MAX_FILE_SIZE / 1024.0 / 1024.0, path));
+        // 8. 检查符号链接
+        try {
+            if (Files.exists(normalizedPath) && Files.isSymbolicLink(normalizedPath)) {
+                throw new SecurityException("Access denied: Symbolic links not allowed: " + path);
+            }
+        } catch (SecurityException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new SecurityException("Access denied: Error checking path: " + path);
         }
     }
 
-    public static void validateContentSize(String content) throws SecurityException {
-        if (content != null && content.length() > MAX_FILE_SIZE) {
-            throw new SecurityException(String.format("Content size exceeds limit (max %.2fMB)", MAX_FILE_SIZE / 1024.0 / 1024.0));
-        }
-    }
-
-    public static boolean isScriptThread() {
-        return Arrays.stream(Thread.currentThread().getStackTrace())
-                .anyMatch(element -> element.getClassName().contains("rhino") ||
-                        element.getClassName().contains("script"));
-    }
-
-    public static void logSecurityViolation(String message, String path) {
-        Filesjs.LOGGER.warn("Security violation: {} (Path: {})", message, path);
-        if (isScriptThread()) {
-            Filesjs.LOGGER.warn("Violation from script execution");
-        }
+    private static String getFileExtension(String path) {
+        int lastDot = path.lastIndexOf('.');
+        return lastDot > 0 ? path.substring(lastDot).toLowerCase() : "";
     }
 } 

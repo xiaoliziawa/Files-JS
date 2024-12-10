@@ -3,7 +3,6 @@ package net.prizowo.filejs.kubejs;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import net.prizowo.filejs.FilesJSPlugin;
 import net.prizowo.filejs.Filesjs;
@@ -28,31 +27,20 @@ import java.util.zip.ZipOutputStream;
 
 public class FilesWrapper {
     private Path validateAndNormalizePath(String path) throws SecurityException {
+        Path minecraftDir = FileAccessManager.getMinecraftDir();
+        
+        Path inputPath = Paths.get(path).normalize();
+        
+        if (inputPath.isAbsolute()) {
+            if (!inputPath.startsWith(minecraftDir)) {
+                throw new SecurityException("Access denied: Cannot access files outside Minecraft instance directory: " + path);
+            }
+            path = minecraftDir.relativize(inputPath).toString().replace('\\', '/');
+        }
+        
         FileAccessManager.validateFileAccess(path);
         
-        Path normalizedPath = Paths.get(path).normalize();
-        Path minecraftDir = FMLPaths.GAMEDIR.get();
-        Path relativePath = minecraftDir.relativize(normalizedPath);
-        
-        if (!normalizedPath.startsWith(minecraftDir) || 
-            relativePath.toString().contains("..")) {
-            throw new SecurityException("Access denied: Unsafe path: " + path);
-        }
-        
-        String relativePathStr = relativePath.toString().replace('\\', '/');
-        boolean allowed = false;
-        for (String dir : FileAccessManager.ALLOWED_SUBDIRS) {
-            if (relativePathStr.startsWith(dir + "/") || relativePathStr.equals(dir)) {
-                allowed = true;
-                break;
-            }
-        }
-        
-        if (!allowed) {
-            throw new SecurityException("Access denied: Directory not allowed: " + path);
-        }
-        
-        return normalizedPath;
+        return minecraftDir.resolve(path).normalize();
     }
 
     public String readFile(String path) {
@@ -164,26 +152,20 @@ public class FilesWrapper {
 
     public void delete(String path) {
         try {
-            // 先进行安全检查
             Path normalizedPath = validateAndNormalizePath(path);
             
-            // 确保文件存在
             if (!Files.exists(normalizedPath)) {
                 throw new IOException("File does not exist: " + path);
             }
             
-            // 获取文件类型（目录或文件）
             boolean isDirectory = Files.isDirectory(normalizedPath);
             
-            // 创建事件对象进行额外的安全检查
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             ServerLevel level = server.overworld();
             FileEventJS event = new FileEventJS(path, null, isDirectory ? "directory_deleted" : "deleted", null, server, level);
             
-            // 如果事件创建成功（通过了安全检查），才执行删除操作
             Files.delete(normalizedPath);
             
-            // 触发事件
             if (isDirectory) {
                 FilesJSPlugin.DIRECTORY_DELETED.post(event);
             } else {
@@ -218,12 +200,13 @@ public class FilesWrapper {
             Path sourcePath = validateAndNormalizePath(source);
             Path targetPath = validateAndNormalizePath(target);
             
+            FileEventJS event = new FileEventJS(target, null, "copied", null,
+                ServerLifecycleHooks.getCurrentServer(), 
+                ServerLifecycleHooks.getCurrentServer().overworld());
+            
             Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
             
-            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-            ServerLevel level = server.overworld();
-            String content = new String(Files.readAllBytes(targetPath), StandardCharsets.UTF_8);
-            FilesJSPlugin.FILE_COPIED.post(new FileEventJS(target, content, "copied", null, server, level));
+            FilesJSPlugin.FILE_COPIED.post(event);
         } catch (SecurityException e) {
             Filesjs.LOGGER.error("Security violation in copy operation: " + source + " -> " + target, e);
             throw e;
@@ -386,22 +369,23 @@ public class FilesWrapper {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
             List<String> files = new ArrayList<>();
+            
             Files.walk(normalizedPath)
-                    .filter(p -> {
-                        try {
-                            // 对每个子路径也进行安全检查
-                            validateAndNormalizePath(p.toString());
-                            return Files.isRegularFile(p);
-                        } catch (SecurityException e) {
-                            Filesjs.LOGGER.warn("Skipping unsafe path in recursive listing: " + p);
-                            return false;
-                        }
-                    })
-                    .map(Path::toString)
-                    .forEach(files::add);
+                .filter(p -> {
+                    try {
+                        validateAndNormalizePath(p.toString());
+                        return Files.isRegularFile(p);
+                    } catch (SecurityException e) {
+                        Filesjs.LOGGER.warn("Skipping unsafe path in recursive listing: " + p);
+                        return false;
+                    }
+                })
+                .map(Path::toString)
+                .forEach(files::add);
+                
             return files;
         } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in recursive file listing: " + path, e);
+            Filesjs.LOGGER.error("Security violation in recursive listing: " + path, e);
             throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error listing files recursively: " + path, e);
@@ -418,7 +402,6 @@ public class FilesWrapper {
             Files.walk(sourcePath)
                     .filter(path -> {
                         try {
-                            // 对每个源文件路径进行安全检查
                             validateAndNormalizePath(path.toString());
                             return Files.isRegularFile(path) && matcher.matches(path.getFileName());
                         } catch (SecurityException e) {
@@ -429,7 +412,6 @@ public class FilesWrapper {
                     .forEach(source -> {
                         try {
                             Path target = targetPath.resolve(sourcePath.relativize(source));
-                            // 对目标路径也进行安全检查
                             validateAndNormalizePath(target.toString());
                             Files.createDirectories(target.getParent());
                             Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
@@ -456,7 +438,7 @@ public class FilesWrapper {
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
             String backupName = sourcePath.getFileName().toString() + "." + timestamp + ".backup";
             
-            // 确保备份目录存在且安全
+            // 确保备目录存在且安全
             Path backupDir = Paths.get("kubejs/backups");
             Path backupPath = backupDir.resolve(backupName);
             validateAndNormalizePath(backupPath.toString());
@@ -491,20 +473,17 @@ public class FilesWrapper {
 
     public void mergeFiles(List<String> sourcePaths, String targetPath) {
         try {
-            // 验证所有源文件路径
             List<Path> normalizedSourcePaths = new ArrayList<>();
             for (String path : sourcePaths) {
                 normalizedSourcePaths.add(validateAndNormalizePath(path));
             }
             
-            // 验证目标路径
             Path normalizedTargetPath = validateAndNormalizePath(targetPath);
             
-            // 合并文件内容
             List<String> mergedContent = new ArrayList<>();
             for (Path path : normalizedSourcePaths) {
                 mergedContent.addAll(Files.readAllLines(path, StandardCharsets.UTF_8));
-                mergedContent.add(""); // 添加空行分隔
+                mergedContent.add("");
             }
 
             Files.write(normalizedTargetPath, mergedContent, StandardCharsets.UTF_8);
@@ -554,7 +533,6 @@ public class FilesWrapper {
         }
     }
 
-    // 计算文件的MD5哈希值
     public String getFileMD5(String path) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
@@ -638,8 +616,19 @@ public class FilesWrapper {
     public void watchDirectory(String path, Consumer<Path> changeCallback) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
-            WatchService watchService = FileSystems.getDefault().newWatchService();
-            normalizedPath.register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
+            
+            FileEventJS watchEvent = new FileEventJS(path, null, "watch_started", null,
+                ServerLifecycleHooks.getCurrentServer(),
+                ServerLifecycleHooks.getCurrentServer().overworld());
+            
+            WatchService watchService;
+            try {
+                watchService = FileSystems.getDefault().newWatchService();
+                normalizedPath.register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
+            } catch (IOException e) {
+                Filesjs.LOGGER.error("Error creating watch service: " + path, e);
+                throw new RuntimeException("Failed to create watch service: " + path, e);
+            }
 
             watchServices.put(path, watchService);
 
@@ -647,12 +636,11 @@ public class FilesWrapper {
                 try {
                     while (true) {
                         WatchKey key = watchService.take();
-                        for (WatchEvent<?> event : key.pollEvents()) {
+                        for (WatchEvent<?> watchedEvent : key.pollEvents()) {
                             @SuppressWarnings("unchecked")
-                            WatchEvent<Path> pathEvent = (WatchEvent<Path>) event;
+                            WatchEvent<Path> pathEvent = (WatchEvent<Path>) watchedEvent;
                             Path changed = normalizedPath.resolve(pathEvent.context());
                             try {
-                                // 对变更的文件路径进行安全检查
                                 validateAndNormalizePath(changed.toString());
                                 changeCallback.accept(changed);
                             } catch (SecurityException e) {
@@ -668,11 +656,8 @@ public class FilesWrapper {
             watchThread.setDaemon(true);
             watchThread.start();
         } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in setting up file watcher: " + path, e);
+            Filesjs.LOGGER.error("Security violation in watch operation: " + path, e);
             throw e;
-        } catch (IOException e) {
-            Filesjs.LOGGER.error("Error setting up file watcher: " + path, e);
-            throw new RuntimeException("Failed to set up file watcher: " + path, e);
         }
     }
 
@@ -699,7 +684,6 @@ public class FilesWrapper {
 
     private void triggerAccessDenied(String path, String operation, ServerPlayer player) {
         try {
-            // 即使是访问被拒绝的路径，也要尝试范化它以便记录
             Path normalizedPath = Paths.get(path).normalize();
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             ServerLevel level = server.overworld();
@@ -712,14 +696,12 @@ public class FilesWrapper {
                 level
             ));
             
-            // 记录详细的访问拒绝信息
-            Filesjs.LOGGER.warn("Access denied: Player {} attempted {} operation on {}", 
+            Filesjs.LOGGER.warn("Access denied: Player {} attempted {} operation on {}",
                 player != null ? player.getName().getString() : "Unknown",
                 operation,
                 normalizedPath
             );
         } catch (Exception e) {
-            // 即使在处理访问拒绝事件时出错，也要确保记录下来
             Filesjs.LOGGER.error("Error handling access denied event: " + path, e);
         }
     }
@@ -863,45 +845,36 @@ public class FilesWrapper {
         return maxLength > 0 ? (double) lcsLength / maxLength : 1.0;
     }
 
-    // 存储事件监听器的引用
     private Object currentTickListener = null;
 
     public void scheduleBackup(String path, int ticks) {
         try {
-            // 验证路径安全性
             Path normalizedPath = validateAndNormalizePath(path);
             
-            // 如果ticks为0，执行即时备份
             if (ticks == 0) {
                 doBackup(normalizedPath.toString());
                 return;
             }
 
-            // 使用MinecraftServer的tick来计时
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             if (server != null) {
-                // 如果存在旧的监听器，先移除它
                 if (currentTickListener != null) {
                     net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(currentTickListener);
                 }
 
-                // 创建一个计数器
                 final int[] tickCounter = {0};
                 
-                // 创建新的监听器对象
                 Object listener = new Object() {
                     @net.minecraftforge.eventbus.api.SubscribeEvent
                     public void onServerTick(net.minecraftforge.event.TickEvent.ServerTickEvent event) {
                         if (event.phase == net.minecraftforge.event.TickEvent.Phase.END) {
                             tickCounter[0]++;
                             if (tickCounter[0] >= ticks) {
-                                // 执行备份
                                 try {
                                     doBackup(normalizedPath.toString());
                                 } catch (Exception e) {
                                     Filesjs.LOGGER.error("Error during scheduled backup: " + path, e);
                                 }
-                                // 移除监听器
                                 net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(this);
                                 currentTickListener = null;
                             }
@@ -909,7 +882,6 @@ public class FilesWrapper {
                     }
                 };
 
-                // 注册新的监听器
                 currentTickListener = listener;
                 net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(listener);
             }
@@ -919,7 +891,6 @@ public class FilesWrapper {
         }
     }
 
-    // 修复 doBackup 方法
     private void doBackup(String path) {
         try {
             Path sourcePath = validateAndNormalizePath(path);
@@ -927,23 +898,18 @@ public class FilesWrapper {
                 throw new IOException("Source file does not exist: " + path);
             }
 
-            // 创建备份目录
             Path backupDir = Paths.get("kubejs/backups");
             Files.createDirectories(backupDir);
 
-            // 生成备份文件名
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
             String fileName = sourcePath.getFileName().toString();
             String backupName = fileName + "." + timestamp + ".backup";
             
-            // 创建备份路径
             Path backupPath = backupDir.resolve(backupName);
             validateAndNormalizePath(backupPath.toString());
 
-            // 执行备份
             Files.copy(sourcePath, backupPath, StandardCopyOption.REPLACE_EXISTING);
 
-            // 触发事件
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             ServerLevel level = server.overworld();
             FilesJSPlugin.FILE_BACKUP_CREATED.post(new FileEventJS(
@@ -955,7 +921,6 @@ public class FilesWrapper {
                 level
             ));
 
-            // 清理旧备份
             cleanupOldBackups(backupDir, 5);
         } catch (SecurityException e) {
             Filesjs.LOGGER.error("Security violation in backup operation: " + path, e);
@@ -966,12 +931,10 @@ public class FilesWrapper {
         }
     }
 
-    // 修复 cleanupOldBackups 方法
     private void cleanupOldBackups(Path backupDir, int keepCount) throws IOException {
         try {
             if (!Files.exists(backupDir)) return;
 
-            // 获取所有备份文件并按修改时间排序
             List<Path> backups = Files.list(backupDir)
                 .filter(path -> {
                     try {
@@ -991,7 +954,6 @@ public class FilesWrapper {
                 })
                 .collect(Collectors.toList());
 
-            // 删除多余的备份
             if (backups.size() > keepCount) {
                 for (Path backup : backups.subList(keepCount, backups.size())) {
                     try {
@@ -1004,6 +966,17 @@ public class FilesWrapper {
             }
         } catch (SecurityException e) {
             Filesjs.LOGGER.error("Security violation in cleanup operation", e);
+            throw e;
+        }
+    }
+
+    private FileEventJS createFileEvent(String path, String content, String type) {
+        try {
+            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            ServerLevel level = server.overworld();
+            return new FileEventJS(path, content, type, null, server, level);
+        } catch (SecurityException e) {
+            Filesjs.LOGGER.error("Security violation creating event: " + path, e);
             throw e;
         }
     }
