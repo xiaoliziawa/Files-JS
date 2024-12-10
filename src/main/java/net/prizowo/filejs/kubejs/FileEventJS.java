@@ -22,18 +22,16 @@ public class FileEventJS extends EventJS {
     };
 
     private static boolean isPathSafe(String path) {
-        Path normalizedPath = Paths.get(path).normalize();
-        String pathStr = normalizedPath.toString().replace('\\', '/');
-
-        if (pathStr.contains("..")) {
+        try {
+            // 使用 FileAccessManager 进行统一的安全检查
+            FileAccessManager.validateFileAccess(path);
+            return true;
+        } catch (SecurityException e) {
             return false;
         }
-
-        return Arrays.stream(ALLOWED_DIRECTORIES)
-                .anyMatch(dir -> pathStr.startsWith(dir + "/"));
     }
 
-    public FileEventJS(String path, String content, String eventType, ServerPlayer player, MinecraftServer server, ServerLevel level) {
+    public FileEventJS(String path, String content, String type, ServerPlayer player, MinecraftServer server, ServerLevel level) {
         if (!isPathSafe(path)) {
             throw new SecurityException("Access denied: Unsafe path: " + path);
         }

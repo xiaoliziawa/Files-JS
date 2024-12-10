@@ -1,6 +1,6 @@
 # Mod Info
 enable_annotation=false
-mod_version = 1.1
+mod_version = 1.2.1
 formal_version = false
 
 kubejs_version=2001.6.4-build.120

@@ -9,7 +9,7 @@ import java.io.IOException;
 import java.util.*;
 
 public class FileAccessManager {
-    private static final Set<String> ALLOWED_SUBDIRS = new HashSet<>(Arrays.asList(
+    public static final Set<String> ALLOWED_SUBDIRS = new HashSet<>(Arrays.asList(
             "config",
             "saves",
             "logs",
@@ -24,86 +24,30 @@ public class FileAccessManager {
     ));
 
     private static final Set<String> ALLOWED_EXTENSIONS = new HashSet<>(Arrays.asList(
-            ".js",       // JavaScript
-            ".mjs",      // ES Module
-            ".cjs",      // CommonJS
-            ".jsx",      // React
-
-            ".py",       // Python
-            ".pyw",      // Python Windows
-            ".pyi",      // Python Interface
-
-            ".java",     // Java Source
-            ".class",    // Java Class
-            ".jar",      // Java Archive
-
-            ".html",     // HTML
-            ".htm",      // HTML
-            ".css",      // CSS
-            ".scss",     // SASS
-            ".less",     // LESS
-            ".vue",
-
             ".json",     // JSON
-            ".json5",    // JSON5
-            ".yaml",     // YAML
-            ".yml",      // YAML
             ".toml",     // TOML
-            ".xml",      // XML
-            ".csv",      // CSV
-            ".tsv",      // TSV
-
             ".properties", // Properties
-            ".conf",     // Config
-            ".config",   // Config
-            ".cfg",      // Config
-            ".ini",      // INI
-
-            ".lua",      // Lua
-            ".rb",       // Ruby
-            ".php",      // PHP
-            ".pl",       // Perl
-            ".sh",       // Shell
-            ".bat",      // Batch
-            ".ps1",      // PowerShell
-            ".zs",       // ZenScript
-            ".groovy",   // Groovy
-            ".gradle",   // Gradle
-            ".kt",       // Kotlin
-            ".kts",      // Kotlin Script
-
+            ".cfg",      // Cfg
             ".nbt",      // NBT
             ".mcfunction", // Minecraft Function
-            ".mcmeta",   // Minecraft Metadata
-            ".lang",     // Language
-            ".dat",      // Data
-
-            ".txt",      // Text
+            ".mcmeta",   // mcmeta
+            ".lang",     // lang
+            ".dat",      // data
+            
+            ".js",       // JavaScript
+            ".zs",       // ZenScript
+            
+            ".txt",      // TXT
             ".md",       // Markdown
-            ".log",      // Log
-            ".template", // Template
-            ".list",     // List
-
-            ".sql",      // SQL
-            ".r",        // R
-            ".c",        // C
-            ".cpp",      // C++
-            ".h",        // Header
-            ".hpp",      // C++ Header
-            ".cs",       // C#
-            ".go",       // Go
-            ".rs",       // Rust
-            ".ts",       // TypeScript
-            ".tsx",      // TypeScript React
-
-            // 备份文件
-            ".backup",    // 备份文件
-            ".bak"       // 备份文件替代扩展名
+            ".log",      // log
+            ".backup",   // backup
+            ".bak",      // backup 2
+            ".zip"       // ZIP
     ));
 
     private static final long MAX_FILE_SIZE = 1024 * 1024 * 10; // 10MB
 
-    private static Path getMinecraftDir() {
+    public static Path getMinecraftDir() {
         return FMLPaths.GAMEDIR.get();
     }
 
