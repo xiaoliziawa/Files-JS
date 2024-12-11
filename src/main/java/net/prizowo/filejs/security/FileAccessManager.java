@@ -18,7 +18,8 @@ public class FileAccessManager {
             "defaultconfigs",
             "schematics",
             "crash-reports",
-            "screenshots"
+            "screenshots",
+            "shaderpacks"
     ));
 
     public static final Set<String> ALLOWED_EXTENSIONS = new HashSet<>(Arrays.asList(
@@ -34,6 +35,7 @@ public class FileAccessManager {
             
             ".js",       // JavaScript
             ".zs",       // ZenScript
+            ".ts",       // TypeScript
             
             ".txt",      // TXT
             ".md",       // Markdown

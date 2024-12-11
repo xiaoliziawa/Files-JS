@@ -40,7 +40,6 @@ let lastLines = FilesJS.readLastLines('kubejs/logs/latest.log', 10);
 // Save a script file (auto-adds `.js` extension and timestamp comments)
 FilesJS.saveScript('kubejs/scripts/newscript', 'console.log("Hello");');
 ```
-
 ### File Management Operations
 
 ```javascript
@@ -133,45 +132,6 @@ FilesJS.scheduleBackup('kubejs/config/settings.json', 100); // Backup after 100 
 
 // Search file contents
 let matches = FilesJS.searchInFile('kubejs/logs/latest.log', 'ERROR');
-```
-
-### File Event System
-
-```javascript
-// File creation event
-Files.fileCreated(event => {
-    console.log('File created:', event.getPath());
-});
-
-// File modification event
-Files.fileChanged(event => {
-    console.log('File modified:', event.getPath());
-});
-
-// File deletion event
-Files.fileDeleted(event => {
-    console.log('File deleted:', event.getPath());
-});
-
-// File move event
-Files.fileMoved(event => {
-    console.log('File moved:', event.getPath());
-});
-
-// File copy event
-Files.fileCopied(event => {
-    console.log('File copied:', event.getPath());
-});
-
-// File rename event
-Files.fileRenamed(event => {
-    console.log('File renamed:', event.getPath());
-});
-
-// Directory events
-Files.directoryCreated(event => {
-    console.log('Directory created:', event.getPath());
-});
 ```
 
 ## Security and Limitations
