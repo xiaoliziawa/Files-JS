@@ -9,22 +9,22 @@ import net.prizowo.filejs.kubejs.FileEventJS;
 import net.prizowo.filejs.kubejs.FilesWrapper;
 
 public class FilesJSPlugin extends KubeJSPlugin {
-    public static final EventGroup GROUP = EventGroup.of("FilesJS");
-    public static final EventHandler FILE_CREATED = GROUP.server("file_created", () -> FileEventJS.class);
-    public static final EventHandler FILE_CHANGED = GROUP.server("file_changed", () -> FileEventJS.class);
-    public static final EventHandler FILE_DELETED = GROUP.server("file_deleted", () -> FileEventJS.class);
-    public static final EventHandler FILE_COPIED = GROUP.server("file_copied", () -> FileEventJS.class);
-    public static final EventHandler FILE_MOVED = GROUP.server("file_moved", () -> FileEventJS.class);
-    public static final EventHandler FILE_RENAMED = GROUP.server("file_renamed", () -> FileEventJS.class);
-    public static final EventHandler FILE_BACKUP_CREATED = GROUP.server("file_backup_created", () -> FileEventJS.class);
-    public static final EventHandler FILES_MERGED = GROUP.server("files_merged", () -> FileEventJS.class);
-    public static final EventHandler FILE_WATCH_STOPPED = GROUP.server("file_watch_stopped", () -> FileEventJS.class);
-    public static final EventHandler DIRECTORY_CREATED = GROUP.server("directory_created", () -> FileEventJS.class);
-    public static final EventHandler DIRECTORY_DELETED = GROUP.server("directory_deleted", () -> FileEventJS.class);
-    public static final EventHandler FILE_ACCESS_DENIED = GROUP.server("file_access_denied", () -> FileEventJS.class);
-    public static final EventHandler FILE_SIZE_THRESHOLD = GROUP.server("file_size_threshold", () -> FileEventJS.class);
-    public static final EventHandler FILE_PATTERN_MATCHED = GROUP.server("file_pattern_matched", () -> FileEventJS.class);
-    public static final EventHandler FILE_CONTENT_CHANGED_SIGNIFICANTLY = GROUP.server("file_content_changed_significantly", () -> FileEventJS.class);
+    public static final EventGroup GROUP = EventGroup.of("Files");
+    public static final EventHandler FILE_CREATED = GROUP.server("fileCreated", () -> FileEventJS.class);
+    public static final EventHandler FILE_CHANGED = GROUP.server("fileChanged", () -> FileEventJS.class);
+    public static final EventHandler FILE_DELETED = GROUP.server("fileDeleted", () -> FileEventJS.class);
+    public static final EventHandler FILE_COPIED = GROUP.server("fileCopied", () -> FileEventJS.class);
+    public static final EventHandler FILE_MOVED = GROUP.server("fileMoved", () -> FileEventJS.class);
+    public static final EventHandler FILE_RENAMED = GROUP.server("fileRenamed", () -> FileEventJS.class);
+    public static final EventHandler FILE_BACKUP_CREATED = GROUP.server("fileBackupCreated", () -> FileEventJS.class);
+    public static final EventHandler FILES_MERGED = GROUP.server("filesMerged", () -> FileEventJS.class);
+    public static final EventHandler FILE_WATCH_STOPPED = GROUP.server("fileWatchStopped", () -> FileEventJS.class);
+    public static final EventHandler DIRECTORY_CREATED = GROUP.server("directoryCreated", () -> FileEventJS.class);
+    public static final EventHandler DIRECTORY_DELETED = GROUP.server("directoryDeleted", () -> FileEventJS.class);
+    public static final EventHandler FILE_ACCESS_DENIED = GROUP.server("fileAccessDenied", () -> FileEventJS.class);
+    public static final EventHandler FILE_SIZE_THRESHOLD = GROUP.server("fileSizeThreshold", () -> FileEventJS.class);
+    public static final EventHandler FILE_PATTERN_MATCHED = GROUP.server("filePatternMatched", () -> FileEventJS.class);
+    public static final EventHandler FILE_CONTENT_CHANGED_SIGNIFICANTLY = GROUP.server("fileContentChangedSignificantly", () -> FileEventJS.class);
 
     @Override
     public void registerBindings(BindingsEvent event) {

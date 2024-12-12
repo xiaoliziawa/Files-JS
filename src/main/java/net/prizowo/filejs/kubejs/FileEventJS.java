@@ -4,37 +4,18 @@ import dev.latvian.mods.kubejs.event.EventJS;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.prizowo.filejs.security.FileAccessManager;
 
 public class FileEventJS extends EventJS {
     private final String path;
     private final String content;
-    private final ServerPlayer player;
-    private final MinecraftServer server;
+    private final String type;
+    private final ServerPlayer server;
     private final ServerLevel level;
 
-    private static final String[] ALLOWED_DIRECTORIES = {
-            "kubejs",
-            "config",
-            "scripts"
-    };
-
-    private static boolean isPathSafe(String path) {
-        try {
-            FileAccessManager.validateFileAccess(path);
-            return true;
-        } catch (SecurityException e) {
-            return false;
-        }
-    }
-
-    public FileEventJS(String path, String content, String type, ServerPlayer player, MinecraftServer server, ServerLevel level) {
-        if (!isPathSafe(path)) {
-            throw new SecurityException("Access denied: Unsafe path: " + path);
-        }
+    public FileEventJS(String path, String content, String type, ServerPlayer server, MinecraftServer minecraftServer, ServerLevel level) {
         this.path = path;
         this.content = content;
-        this.player = player;
+        this.type = type;
         this.server = server;
         this.level = level;
     }
@@ -47,11 +28,11 @@ public class FileEventJS extends EventJS {
         return content;
     }
 
-    public ServerPlayer getPlayer() {
-        return player;
+    public String getType() {
+        return type;
     }
 
-    public MinecraftServer getServer() {
+    public ServerPlayer getServer() {
         return server;
     }
 
