@@ -2,11 +2,11 @@ package net.prizowo.filejs.kubejs;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import net.prizowo.filejs.FilesJSPlugin;
 import net.prizowo.filejs.Filesjs;
-import net.prizowo.filejs.security.FileAccessManager;
+import net.minecraftforge.fml.loading.FMLPaths;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
@@ -26,92 +26,26 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 public class FilesWrapper {
-    private Path validateAndNormalizePath(String path) throws SecurityException {
-        if (path == null || path.trim().isEmpty()) {
-            throw new SecurityException("Access denied: Empty path");
-        }
-        
-        Path minecraftDir = FileAccessManager.getMinecraftDir().normalize().toAbsolutePath();
-        
-        path = path.replace('\\', '/').trim();
-        
-        if (path.contains(":") || path.startsWith("/") || path.startsWith("\\") ||
-            path.contains("../") || path.contains("..\\") || 
-            path.contains("./") || path.contains(".\\") ||
-            path.contains("|") || path.contains("*") || path.contains("?") ||
-            path.contains("<") || path.contains(">") || path.contains("\"")) {
-            throw new SecurityException("Access denied: Invalid path characters or absolute path detected: " + path);
-        }
-        
-        Path resolvedPath;
-        try {
-            resolvedPath = minecraftDir.resolve(path).normalize().toAbsolutePath();
-            if (!resolvedPath.startsWith(minecraftDir)) {
-                throw new SecurityException("Access denied: Path escapes Minecraft directory: " + path);
-            }
-        } catch (Exception e) {
-            throw new SecurityException("Access denied: Invalid path format: " + path);
-        }
-        
-        String relativePathStr;
-        try {
-            relativePathStr = minecraftDir.relativize(resolvedPath).toString().replace('\\', '/');
-        } catch (Exception e) {
-            throw new SecurityException("Access denied: Cannot relativize path: " + path);
-        }
-        
-        String firstDir = relativePathStr.split("/")[0];
-        if (!FileAccessManager.ALLOWED_SUBDIRS.contains(firstDir)) {
-            throw new SecurityException("Access denied: Directory not allowed: " + firstDir);
-        }
-        
-        if (!Files.isDirectory(resolvedPath)) {
-            if (!relativePathStr.startsWith("kubejs/backups/")) {
-                String extension = getFileExtension(relativePathStr);
-                if (!FileAccessManager.ALLOWED_EXTENSIONS.contains(extension.toLowerCase())) {
-                    throw new SecurityException("Access denied: File type not allowed: " + extension);
-                }
-            }
-        }
-        
-        try {
-            if (Files.exists(resolvedPath) && Files.isSymbolicLink(resolvedPath)) {
-                throw new SecurityException("Access denied: Symbolic links not allowed: " + path);
-            }
-        } catch (SecurityException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new SecurityException("Access denied: Error checking path: " + path);
-        }
-        
-        return resolvedPath;
-    }
-
-    private static String getFileExtension(String path) {
-        int lastDot = path.lastIndexOf('.');
-        return lastDot > 0 ? path.substring(lastDot).toLowerCase() : "";
+    private Path validateAndNormalizePath(String path) {
+        Path minecraftDir = FMLPaths.GAMEDIR.get().normalize().toAbsolutePath();
+        path = path.replace('\\', '/');
+        return minecraftDir.resolve(path).normalize().toAbsolutePath();
     }
 
     public String readFile(String path) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
             return new String(Files.readAllBytes(normalizedPath), StandardCharsets.UTF_8);
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in read operation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error reading file: " + path, e);
             throw new RuntimeException("Failed to read file: " + path, e);
         }
     }
 
-    public List<String> readLines(String path) throws IOException {
+    public List<String> readLines(String path) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
             return Files.readAllLines(normalizedPath, StandardCharsets.UTF_8);
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in readLines operation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error reading lines from file: " + path, e);
             throw new RuntimeException("Failed to read lines from file: " + path, e);
@@ -121,13 +55,9 @@ public class FilesWrapper {
     public void writeFile(String path, String content) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
-            
-            if (content.length() > 1024 * 1024 * 5) { // 5MB
-                throw new SecurityException("Content size exceeds limit (max 5MB)");
-            }
+            Files.write(normalizedPath, content.getBytes(StandardCharsets.UTF_8));
             
             boolean isNewFile = !Files.exists(normalizedPath);
-            Files.write(normalizedPath, content.getBytes(StandardCharsets.UTF_8));
             
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             ServerLevel level = server.overworld();
@@ -137,9 +67,6 @@ public class FilesWrapper {
             } else {
                 FilesJSPlugin.FILE_CHANGED.post(new FileEventJS(path, content, "changed", null, server, level));
             }
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in write operation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error writing file: " + path, e);
             throw new RuntimeException("Failed to write file: " + path, e);
@@ -150,9 +77,6 @@ public class FilesWrapper {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
             Files.write(normalizedPath, lines, StandardCharsets.UTF_8);
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in writeLines operation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error writing lines to file: " + path, e);
             throw new RuntimeException("Failed to write lines to file: " + path, e);
@@ -164,9 +88,6 @@ public class FilesWrapper {
             Path normalizedPath = validateAndNormalizePath(path);
             Files.write(normalizedPath, content.getBytes(StandardCharsets.UTF_8),
                     StandardOpenOption.APPEND, StandardOpenOption.CREATE);
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in append operation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error appending to file: " + path, e);
             throw new RuntimeException("Failed to append to file: " + path, e);
@@ -174,13 +95,8 @@ public class FilesWrapper {
     }
 
     public boolean exists(String path) {
-        try {
-            Path normalizedPath = validateAndNormalizePath(path);
-            return Files.exists(normalizedPath);
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in exists check: " + path, e);
-            throw e;
-        }
+        Path normalizedPath = validateAndNormalizePath(path);
+        return Files.exists(normalizedPath);
     }
 
     public void createDirectory(String path) {
@@ -190,9 +106,6 @@ public class FilesWrapper {
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             ServerLevel level = server.overworld();
             FilesJSPlugin.DIRECTORY_CREATED.post(new FileEventJS(path, null, "directory_created", null, server, level));
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in directory creation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error creating directory: " + path, e);
             throw new RuntimeException("Failed to create directory: " + path, e);
@@ -202,11 +115,6 @@ public class FilesWrapper {
     public void delete(String path) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
-            
-            if (!Files.exists(normalizedPath)) {
-                throw new IOException("File does not exist: " + path);
-            }
-            
             boolean isDirectory = Files.isDirectory(normalizedPath);
             
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
@@ -220,9 +128,6 @@ public class FilesWrapper {
             } else {
                 FilesJSPlugin.FILE_DELETED.post(event);
             }
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in delete operation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error deleting file: " + path, e);
             throw new RuntimeException("Failed to delete file: " + path, e);
@@ -232,25 +137,10 @@ public class FilesWrapper {
     public List<String> listFiles(String path) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
-            if (!Files.isDirectory(normalizedPath)) {
-                throw new SecurityException("Access denied: Path is not a directory: " + path);
-            }
-            
             return Files.list(normalizedPath)
-                .filter(p -> {
-                    try {
-                        validateAndNormalizePath(p.toString());
-                        return Files.isRegularFile(p);
-                    } catch (SecurityException e) {
-                        Filesjs.LOGGER.warn("Skipping unsafe file in listing: " + p);
-                        return false;
-                    }
-                })
+                .filter(p -> Files.isRegularFile(p))
                 .map(Path::toString)
                 .collect(Collectors.toList());
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in list operation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error listing files: " + path, e);
             throw new RuntimeException("Failed to list files: " + path, e);
@@ -260,25 +150,10 @@ public class FilesWrapper {
     public List<String> listDirectories(String path) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
-            if (!Files.isDirectory(normalizedPath)) {
-                throw new SecurityException("Access denied: Path is not a directory: " + path);
-            }
-            
             return Files.list(normalizedPath)
-                .filter(p -> {
-                    try {
-                        validateAndNormalizePath(p.toString());
-                        return Files.isDirectory(p);
-                    } catch (SecurityException e) {
-                        Filesjs.LOGGER.warn("Skipping unsafe directory in listing: " + p);
-                        return false;
-                    }
-                })
+                .filter(p -> Files.isDirectory(p))
                 .map(Path::toString)
                 .collect(Collectors.toList());
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in list operation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error listing directories: " + path, e);
             throw new RuntimeException("Failed to list directories: " + path, e);
@@ -297,9 +172,6 @@ public class FilesWrapper {
             Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
             
             FilesJSPlugin.FILE_COPIED.post(event);
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in copy operation: " + source + " -> " + target, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error copying file: " + source + " -> " + target, e);
             throw new RuntimeException("Failed to copy file: " + source + " -> " + target, e);
@@ -317,9 +189,6 @@ public class FilesWrapper {
             ServerLevel level = server.overworld();
             String content = new String(Files.readAllBytes(targetPath), StandardCharsets.UTF_8);
             FilesJSPlugin.FILE_MOVED.post(new FileEventJS(target, content, "moved", null, server, level));
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in move operation: " + source + " -> " + target, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error moving file: " + source + " -> " + target, e);
             throw new RuntimeException("Failed to move file: " + source + " -> " + target, e);
@@ -334,9 +203,6 @@ public class FilesWrapper {
             lines.add(line);
             Files.write(normalizedPath, lines, StandardCharsets.UTF_8,
                     StandardOpenOption.APPEND, StandardOpenOption.CREATE);
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in appendLine operation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error appending line to file: " + path, e);
             throw new RuntimeException("Failed to append line to file: " + path, e);
@@ -350,9 +216,6 @@ public class FilesWrapper {
             if (!Files.exists(normalizedPath)) {
                 Files.createDirectories(normalizedPath);
             }
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in directory creation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error creating directory: " + path, e);
             throw new RuntimeException("Failed to create directory: " + path, e);
@@ -365,14 +228,11 @@ public class FilesWrapper {
             
             Path parent = normalizedPath.getParent();
             if (parent != null) {
-                String parentPath = FileAccessManager.getMinecraftDir().relativize(parent).toString().replace('\\', '/');
+                String parentPath = FMLPaths.GAMEDIR.get().relativize(parent).toString().replace('\\', '/');
                 ensureDirectoryExists(parentPath);
             }
             
             writeFile(path, jsonContent);
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in JSON save: " + path, e);
-            throw e;
         } catch (RuntimeException e) {
             Filesjs.LOGGER.error("Error saving JSON file: " + path, e);
             throw new RuntimeException("Failed to save JSON file: " + path, e);
@@ -389,7 +249,7 @@ public class FilesWrapper {
             
             Path parent = normalizedPath.getParent();
             if (parent != null) {
-                String parentPath = FileAccessManager.getMinecraftDir().relativize(parent).toString().replace('\\', '/');
+                String parentPath = FMLPaths.GAMEDIR.get().relativize(parent).toString().replace('\\', '/');
                 ensureDirectoryExists(parentPath);
             }
 
@@ -401,11 +261,7 @@ public class FilesWrapper {
                     scriptContent
             );
 
-            // 写入脚本内容
             writeFile(path, formattedScript);
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in script save: " + path, e);
-            throw e;
         } catch (RuntimeException e) {
             Filesjs.LOGGER.error("Error saving script file: " + path, e);
             throw new RuntimeException("Failed to save script file: " + path, e);
@@ -418,9 +274,6 @@ public class FilesWrapper {
             List<String> allLines = Files.readAllLines(normalizedPath, StandardCharsets.UTF_8);
             int start = Math.max(0, allLines.size() - n);
             return allLines.subList(start, allLines.size());
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in reading last lines: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error reading last lines: " + path, e);
             throw new RuntimeException("Failed to read last lines: " + path, e);
@@ -433,9 +286,6 @@ public class FilesWrapper {
             return Files.lines(normalizedPath)
                     .filter(line -> line.contains(searchTerm))
                     .collect(Collectors.toList());
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in file search: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error searching in file: " + path, e);
             throw new RuntimeException("Failed to search in file: " + path, e);
@@ -458,9 +308,6 @@ public class FilesWrapper {
             }
 
             return info;
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in getting file info: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error getting file info: " + path, e);
             throw new RuntimeException("Failed to get file info: " + path, e);
@@ -473,22 +320,11 @@ public class FilesWrapper {
             List<String> files = new ArrayList<>();
             
             Files.walk(normalizedPath)
-                .filter(p -> {
-                    try {
-                        validateAndNormalizePath(p.toString());
-                        return Files.isRegularFile(p);
-                    } catch (SecurityException e) {
-                        Filesjs.LOGGER.warn("Skipping unsafe path in recursive listing: " + p);
-                        return false;
-                    }
-                })
+                .filter(p -> Files.isRegularFile(p))
                 .map(Path::toString)
                 .forEach(files::add);
                 
             return files;
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in recursive listing: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error listing files recursively: " + path, e);
             throw new RuntimeException("Failed to list files recursively: " + path, e);
@@ -502,28 +338,16 @@ public class FilesWrapper {
 
             PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + pattern);
             Files.walk(sourcePath)
-                    .filter(path -> {
-                        try {
-                            validateAndNormalizePath(path.toString());
-                            return Files.isRegularFile(path) && matcher.matches(path.getFileName());
-                        } catch (SecurityException e) {
-                            Filesjs.LOGGER.warn("Skipping unsafe path in batch copy: " + path);
-                            return false;
-                        }
-                    })
-                    .forEach(source -> {
-                        try {
-                            Path target = targetPath.resolve(sourcePath.relativize(source));
-                            validateAndNormalizePath(target.toString());
-                            Files.createDirectories(target.getParent());
-                            Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
-                        } catch (SecurityException | IOException e) {
-                            Filesjs.LOGGER.error("Error copying file: " + source, e);
-                        }
-                    });
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in batch copy operation: " + sourceDir + " -> " + targetDir, e);
-            throw e;
+                .filter(path -> Files.isRegularFile(path) && matcher.matches(path.getFileName()))
+                .forEach(source -> {
+                    try {
+                        Path target = targetPath.resolve(sourcePath.relativize(source));
+                        Files.createDirectories(target.getParent());
+                        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+                    } catch (IOException e) {
+                        Filesjs.LOGGER.error("Error copying file: " + source, e);
+                    }
+                });
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error in batch copy operation", e);
             throw new RuntimeException("Failed in batch copy operation", e);
@@ -533,10 +357,6 @@ public class FilesWrapper {
     public void backupFile(String path) {
         try {
             Path sourcePath = validateAndNormalizePath(path);
-            if (!Files.exists(sourcePath)) {
-                throw new IOException("Source file does not exist: " + path);
-            }
-
             String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss").format(new Date());
             String backupName = sourcePath.getFileName().toString() + "." + timestamp + ".backup";
             
@@ -550,9 +370,6 @@ public class FilesWrapper {
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             ServerLevel level = server.overworld();
             FilesJSPlugin.FILE_BACKUP_CREATED.post(new FileEventJS(backupPath.toString(), null, "backup_created", null, server, level));
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in backup creation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error creating backup: " + path, e);
             throw new RuntimeException("Failed to create backup: " + path, e);
@@ -563,9 +380,6 @@ public class FilesWrapper {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
             return Files.size(normalizedPath) == 0;
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in checking empty file: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error checking if file is empty: " + path, e);
             throw new RuntimeException("Failed to check if file is empty: " + path, e);
@@ -592,9 +406,6 @@ public class FilesWrapper {
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             ServerLevel level = server.overworld();
             FilesJSPlugin.FILES_MERGED.post(new FileEventJS(targetPath, String.join("\n", mergedContent), "merged", null, server, level));
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in merging files: " + targetPath, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error merging files to: " + targetPath, e);
             throw new RuntimeException("Failed to merge files: " + targetPath, e);
@@ -607,9 +418,6 @@ public class FilesWrapper {
             String content = new String(Files.readAllBytes(normalizedPath), StandardCharsets.UTF_8);
             String newContent = content.replace(search, replace);
             Files.write(normalizedPath, newContent.getBytes(StandardCharsets.UTF_8));
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in file content replacement: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error replacing content in file: " + path, e);
             throw new RuntimeException("Failed to replace content in file: " + path, e);
@@ -625,9 +433,6 @@ public class FilesWrapper {
                     lineProcessor.accept(line);
                 }
             }
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in processing large file: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error processing large file: " + path, e);
             throw new RuntimeException("Failed to process large file: " + path, e);
@@ -649,9 +454,6 @@ public class FilesWrapper {
                 hexString.append(hex);
             }
             return hexString.toString();
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in MD5 calculation: " + path, e);
-            throw e;
         } catch (IOException | NoSuchAlgorithmException e) {
             Filesjs.LOGGER.error("Error calculating MD5 for file: " + path, e);
             throw new RuntimeException("Failed to calculate MD5: " + path, e);
@@ -663,21 +465,10 @@ public class FilesWrapper {
             Path normalizedPath1 = validateAndNormalizePath(path1);
             Path normalizedPath2 = validateAndNormalizePath(path2);
 
-            // 先检查文件是否存在
-            if (!Files.exists(normalizedPath1)) {
-                throw new IOException("First file does not exist: " + path1);
-            }
-            if (!Files.exists(normalizedPath2)) {
-                throw new IOException("Second file does not exist: " + path2);
-            }
-
             return Arrays.equals(
                 Files.readAllBytes(normalizedPath1),
                 Files.readAllBytes(normalizedPath2)
             );
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in file comparison: " + path1 + " vs " + path2, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error comparing files: " + path1 + " vs " + path2, e);
             throw new RuntimeException("Failed to compare files", e);
@@ -700,15 +491,6 @@ public class FilesWrapper {
 
             try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zip))) {
                 Files.walk(source)
-                    .filter(path -> {
-                        try {
-                            FileAccessManager.validateZipAccess(path.toString());
-                            return true;
-                        } catch (SecurityException e) {
-                            Filesjs.LOGGER.warn("Skipping unsafe path in zip: " + path);
-                            return false;
-                        }
-                    })
                     .forEach(path -> {
                         try {
                             String relativePath = source.relativize(path).toString().replace('\\', '/');
@@ -725,71 +507,54 @@ public class FilesWrapper {
                         }
                     });
             }
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in zip creation: " + sourcePath + " -> " + zipPath, e);
-            throw e;
         } catch (IOException | UncheckedIOException e) {
             Filesjs.LOGGER.error("Error creating zip file: " + zipPath, e);
             throw new RuntimeException("Failed to create zip file: " + zipPath, e);
         }
     }
 
-    private Path validateZipPath(String path) throws SecurityException {
-        try {
-            return Paths.get(FileAccessManager.getMinecraftDir().toString(), path).normalize();
-        } catch (Exception e) {
-            throw new SecurityException("Invalid path: " + path);
-        }
+    private Path validateZipPath(String path) {
+        return Paths.get(FMLPaths.GAMEDIR.get().toString(), path).normalize();
     }
 
     private final Map<String, WatchService> watchServices = new HashMap<>();
 
     public void watchDirectory(String path, Consumer<Path> changeCallback) {
+        Path normalizedPath = validateAndNormalizePath(path);
+        
+        FileEventJS watchEvent = new FileEventJS(path, null, "watch_started", null,
+            ServerLifecycleHooks.getCurrentServer(),
+            ServerLifecycleHooks.getCurrentServer().overworld());
+        
+        WatchService watchService;
         try {
-            Path normalizedPath = validateAndNormalizePath(path);
-            
-            FileEventJS watchEvent = new FileEventJS(path, null, "watch_started", null,
-                ServerLifecycleHooks.getCurrentServer(),
-                ServerLifecycleHooks.getCurrentServer().overworld());
-            
-            WatchService watchService;
-            try {
-                watchService = FileSystems.getDefault().newWatchService();
-                normalizedPath.register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
-            } catch (IOException e) {
-                Filesjs.LOGGER.error("Error creating watch service: " + path, e);
-                throw new RuntimeException("Failed to create watch service: " + path, e);
-            }
-
-            watchServices.put(path, watchService);
-
-            Thread watchThread = new Thread(() -> {
-                try {
-                    while (true) {
-                        WatchKey key = watchService.take();
-                        for (WatchEvent<?> watchedEvent : key.pollEvents()) {
-                            @SuppressWarnings("unchecked")
-                            WatchEvent<Path> pathEvent = (WatchEvent<Path>) watchedEvent;
-                            Path changed = normalizedPath.resolve(pathEvent.context());
-                            try {
-                                validateAndNormalizePath(changed.toString());
-                                changeCallback.accept(changed);
-                            } catch (SecurityException e) {
-                                Filesjs.LOGGER.warn("Skipping unsafe path in watch event: " + changed);
-                            }
-                        }
-                        key.reset();
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            });
-            watchThread.setDaemon(true);
-            watchThread.start();
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in watch operation: " + path, e);
-            throw e;
+            watchService = FileSystems.getDefault().newWatchService();
+            normalizedPath.register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
+        } catch (IOException e) {
+            Filesjs.LOGGER.error("Error creating watch service: " + path, e);
+            throw new RuntimeException("Failed to create watch service: " + path, e);
         }
+
+        watchServices.put(path, watchService);
+
+        Thread watchThread = new Thread(() -> {
+            try {
+                while (true) {
+                    WatchKey key = watchService.take();
+                    for (WatchEvent<?> watchedEvent : key.pollEvents()) {
+                        @SuppressWarnings("unchecked")
+                        WatchEvent<Path> pathEvent = (WatchEvent<Path>) watchedEvent;
+                        Path changed = normalizedPath.resolve(pathEvent.context());
+                        changeCallback.accept(changed);
+                    }
+                    key.reset();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        watchThread.setDaemon(true);
+        watchThread.start();
     }
 
     public void stopWatching(String path) {
@@ -807,128 +572,8 @@ public class FilesWrapper {
                     throw new RuntimeException("Failed to close file watcher: " + path, e);
                 }
             }
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in stopping file watcher: " + path, e);
-            throw e;
-        }
-    }
-
-    private void triggerAccessDenied(String path, String operation, ServerPlayer player) {
-        try {
-            Path normalizedPath = validateAndNormalizePath(path);
-            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-            ServerLevel level = server.overworld();
-            FilesJSPlugin.FILE_ACCESS_DENIED.post(new FileEventJS(
-                normalizedPath.toString(), 
-                null, 
-                "access_denied", 
-                player, 
-                server, 
-                level
-            ));
-            
-            Filesjs.LOGGER.warn("Access denied: Player {} attempted {} operation on {}", 
-                player != null ? player.getName().getString() : "Unknown",
-                operation,
-                normalizedPath
-            );
-        } catch (Exception e) {
-            Filesjs.LOGGER.error("Error handling access denied event: " + path, e);
-        }
-    }
-
-    public void renameFile(String oldPath, String newPath) {
-        try {
-            Path sourcePath = validateAndNormalizePath(oldPath);
-            Path targetPath = validateAndNormalizePath(newPath);
-            
-            String content = new String(Files.readAllBytes(sourcePath), StandardCharsets.UTF_8);
-            
-            Files.move(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
-            
-            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-            ServerLevel level = server.overworld();
-            FilesJSPlugin.FILE_RENAMED.post(new FileEventJS(newPath, content, "renamed", null, server, level));
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in rename operation: " + oldPath + " -> " + newPath, e);
-            throw e;
-        } catch (IOException e) {
-            Filesjs.LOGGER.error("Error renaming file: " + oldPath + " -> " + newPath, e);
-            throw new RuntimeException("Failed to rename file: " + oldPath + " -> " + newPath, e);
-        }
-    }
-
-    public void watchFileSize(String path, long threshold) {
-        try {
-            Path normalizedPath = validateAndNormalizePath(path);
-            
-            Path parentDir = normalizedPath.getParent();
-            if (parentDir == null) {
-                throw new SecurityException("Invalid file path: " + path);
-            }
-            
-            Path fileName = normalizedPath.getFileName();
-            
-            String relativeParentDir = FileAccessManager.getMinecraftDir()
-                .relativize(parentDir)
-                .toString()
-                .replace('\\', '/');
-            
-            watchDirectory(relativeParentDir, changedPath -> {
-                try {
-                    if (changedPath.getFileName().equals(fileName) && Files.exists(changedPath)) {
-                        if (Files.size(changedPath) > threshold) {
-                            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-                            ServerLevel level = server.overworld();
-                            FilesJSPlugin.FILE_SIZE_THRESHOLD.post(new FileEventJS(
-                                path,
-                                String.valueOf(Files.size(changedPath)),
-                                "size_threshold",
-                                null,
-                                server,
-                                level
-                            ));
-                        }
-                    }
-                } catch (IOException e) {
-                    Filesjs.LOGGER.error("Error checking file size: " + path, e);
-                }
-            });
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in setting up file size watch: " + path, e);
-            throw e;
-        }
-    }
-
-    public void watchFilePattern(String directory, String pattern) {
-        try {
-            Path normalizedPath = validateAndNormalizePath(directory);
-            PathMatcher matcher = FileSystems.getDefault().getPathMatcher("glob:" + pattern);
-            
-            watchDirectory(directory, path -> {
-                try {
-                    Path normalizedChangedPath = validateAndNormalizePath(path.toString());
-                    if (matcher.matches(normalizedChangedPath.getFileName())) {
-                        String content = new String(Files.readAllBytes(normalizedChangedPath), StandardCharsets.UTF_8);
-                        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-                        ServerLevel level = server.overworld();
-                        FilesJSPlugin.FILE_PATTERN_MATCHED.post(new FileEventJS(
-                            path.toString(),
-                            content,
-                            "pattern_matched",
-                            null,
-                            server,
-                            level
-                        ));
-                    }
-                } catch (SecurityException e) {
-                    Filesjs.LOGGER.warn("Security violation in pattern watch: " + path);
-                } catch (IOException e) {
-                    Filesjs.LOGGER.error("Error reading matched file: " + path, e);
-                }
-            });
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in setting up pattern watch: " + directory, e);
+        } catch (RuntimeException e) {
+            Filesjs.LOGGER.error("Error stopping file watcher: " + path, e);
             throw e;
         }
     }
@@ -936,16 +581,12 @@ public class FilesWrapper {
     public void watchContentChanges(String path, double threshold) {
         try {
             Path normalizedPath = validateAndNormalizePath(path);
-            
             Path parentDir = normalizedPath.getParent();
-            if (parentDir == null) {
-                throw new SecurityException("Invalid file path: " + path);
-            }
             Path fileName = normalizedPath.getFileName();
             
             String originalContent = new String(Files.readAllBytes(normalizedPath), StandardCharsets.UTF_8);
             
-            String relativeParentDir = FileAccessManager.getMinecraftDir()
+            String relativeParentDir = FMLPaths.GAMEDIR.get()
                 .relativize(parentDir)
                 .toString()
                 .replace('\\', '/');
@@ -972,9 +613,6 @@ public class FilesWrapper {
                     Filesjs.LOGGER.error("Error checking content changes: " + path, e);
                 }
             });
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in setting up content watch: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error setting up content watch: " + path, e);
             throw new RuntimeException("Failed to set up content watch: " + path, e);
@@ -1007,56 +645,47 @@ public class FilesWrapper {
     private Object currentTickListener = null;
 
     public void scheduleBackup(String path, int ticks) {
-        try {
-            Path normalizedPath = validateAndNormalizePath(path);
-            
-            if (ticks == 0) {
-                doBackup(normalizedPath.toString());
-                return;
+        Path normalizedPath = validateAndNormalizePath(path);
+        
+        if (ticks == 0) {
+            doBackup(normalizedPath.toString());
+            return;
+        }
+
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server != null) {
+            if (currentTickListener != null) {
+                MinecraftForge.EVENT_BUS.unregister(currentTickListener);
             }
 
-            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-            if (server != null) {
-                if (currentTickListener != null) {
-                    net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(currentTickListener);
-                }
-
-                final int[] tickCounter = {0};
-                
-                Object listener = new Object() {
-                    @net.minecraftforge.eventbus.api.SubscribeEvent
-                    public void onServerTick(net.minecraftforge.event.TickEvent.ServerTickEvent event) {
-                        if (event.phase == net.minecraftforge.event.TickEvent.Phase.END) {
-                            tickCounter[0]++;
-                            if (tickCounter[0] >= ticks) {
-                                try {
-                                    doBackup(normalizedPath.toString());
-                                } catch (Exception e) {
-                                    Filesjs.LOGGER.error("Error during scheduled backup: " + path, e);
-                                }
-                                net.minecraftforge.common.MinecraftForge.EVENT_BUS.unregister(this);
-                                currentTickListener = null;
+            final int[] tickCounter = {0};
+            
+            Object listener = new Object() {
+                @net.minecraftforge.eventbus.api.SubscribeEvent
+                public void onServerTick(net.minecraftforge.event.TickEvent.ServerTickEvent event) {
+                    if (event.phase == net.minecraftforge.event.TickEvent.Phase.END) {
+                        tickCounter[0]++;
+                        if (tickCounter[0] >= ticks) {
+                            try {
+                                doBackup(normalizedPath.toString());
+                            } catch (Exception e) {
+                                Filesjs.LOGGER.error("Error during scheduled backup: " + path, e);
                             }
+                            MinecraftForge.EVENT_BUS.unregister(this);
+                            currentTickListener = null;
                         }
                     }
-                };
+                }
+            };
 
-                currentTickListener = listener;
-                net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(listener);
-            }
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in scheduling backup: " + path, e);
-            throw e;
+            currentTickListener = listener;
+            MinecraftForge.EVENT_BUS.register(listener);
         }
     }
 
     private void doBackup(String path) {
         try {
             Path sourcePath = validateAndNormalizePath(path);
-            if (!Files.exists(sourcePath)) {
-                throw new IOException("Source file does not exist: " + path);
-            }
-
             Path backupDir = Paths.get("kubejs/backups");
             Files.createDirectories(backupDir);
 
@@ -1081,9 +710,6 @@ public class FilesWrapper {
             ));
 
             cleanupOldBackups(backupDir, 5);
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in backup operation: " + path, e);
-            throw e;
         } catch (IOException e) {
             Filesjs.LOGGER.error("Error creating backup: " + path, e);
             throw new RuntimeException("Failed to create backup: " + path, e);
@@ -1091,53 +717,48 @@ public class FilesWrapper {
     }
 
     private void cleanupOldBackups(Path backupDir, int keepCount) throws IOException {
-        try {
-            if (!Files.exists(backupDir)) return;
+        if (!Files.exists(backupDir)) return;
 
-            List<Path> backups = Files.list(backupDir)
-                .filter(path -> {
-                    try {
-                        validateAndNormalizePath(path.toString());
-                        return path.toString().endsWith(".backup");
-                    } catch (SecurityException e) {
-                        Filesjs.LOGGER.warn("Skipping unsafe backup path: " + path);
-                        return false;
-                    }
-                })
-                .sorted((a, b) -> {
-                    try {
-                        return Files.getLastModifiedTime(b).compareTo(Files.getLastModifiedTime(a));
-                    } catch (IOException e) {
-                        return 0;
-                    }
-                })
-                .collect(Collectors.toList());
-
-            if (backups.size() > keepCount) {
-                for (Path backup : backups.subList(keepCount, backups.size())) {
-                    try {
-                        validateAndNormalizePath(backup.toString());
-                        Files.delete(backup);
-                    } catch (SecurityException e) {
-                        Filesjs.LOGGER.warn("Security violation when deleting old backup: " + backup);
-                    }
+        List<Path> backups = Files.list(backupDir)
+            .filter(path -> path.toString().endsWith(".backup"))
+            .sorted((a, b) -> {
+                try {
+                    return Files.getLastModifiedTime(b).compareTo(Files.getLastModifiedTime(a));
+                } catch (IOException e) {
+                    return 0;
                 }
+            })
+            .collect(Collectors.toList());
+
+        if (backups.size() > keepCount) {
+            for (Path backup : backups.subList(keepCount, backups.size())) {
+                Files.delete(backup);
             }
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation in cleanup operation", e);
-            throw e;
         }
     }
 
     private FileEventJS createFileEvent(String path, String content, String type) {
+        Path normalizedPath = validateAndNormalizePath(path);
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        ServerLevel level = server.overworld();
+        return new FileEventJS(normalizedPath.toString(), content, type, null, server, level);
+    }
+
+    public void renameFile(String oldPath, String newPath) {
         try {
-            Path normalizedPath = validateAndNormalizePath(path);
+            Path sourcePath = validateAndNormalizePath(oldPath);
+            Path targetPath = validateAndNormalizePath(newPath);
+            
+            String content = new String(Files.readAllBytes(sourcePath), StandardCharsets.UTF_8);
+            
+            Files.move(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             ServerLevel level = server.overworld();
-            return new FileEventJS(normalizedPath.toString(), content, type, null, server, level);
-        } catch (SecurityException e) {
-            Filesjs.LOGGER.error("Security violation creating event: " + path, e);
-            throw e;
+            FilesJSPlugin.FILE_RENAMED.post(new FileEventJS(newPath, content, "renamed", null, server, level));
+        } catch (IOException e) {
+            Filesjs.LOGGER.error("Error renaming file: " + oldPath + " -> " + newPath, e);
+            throw new RuntimeException("Failed to rename file: " + oldPath + " -> " + newPath, e);
         }
     }
 } 
