@@ -483,12 +483,10 @@ public class FilesWrapper {
             Path normalizedPath = validateAndNormalizePath(path);
             Path parentDir = normalizedPath.getParent();
             
-            // 确保父目录存在
             if (parentDir != null && !Files.exists(parentDir)) {
                 Files.createDirectories(parentDir);
             }
             
-            // 创建或覆盖文件
             Files.write(normalizedPath, content.getBytes(StandardCharsets.UTF_8));
             
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
