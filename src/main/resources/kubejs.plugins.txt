@@ -1,1 +1,1 @@
-net.prizowo.filejs.FilesJSPlugin
+net.prizowo.filesjs.FilesJSPlugin
