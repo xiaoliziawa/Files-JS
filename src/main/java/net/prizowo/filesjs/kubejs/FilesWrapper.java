@@ -478,13 +478,48 @@ public class FilesWrapper {
         }
     }
 
+    public boolean createFiles(String path, String content) {
+        try {
+            Path normalizedPath = validateAndNormalizePath(path);
+            Path parentDir = normalizedPath.getParent();
+            
+            // 确保父目录存在
+            if (parentDir != null && !Files.exists(parentDir)) {
+                Files.createDirectories(parentDir);
+            }
+            
+            // 创建或覆盖文件
+            Files.write(normalizedPath, content.getBytes(StandardCharsets.UTF_8));
+            
+            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            ServerLevel level = server.overworld();
+            FileEventJS event = new FileEventJS(path, content, "created", null, server, level);
+            FilesJSPlugin.FILE_CREATED.post(ScriptType.SERVER, event);
+            
+            return true;
+        } catch (IOException e) {
+            Filesjs.LOGGER.error("Error creating file: " + path, e);
+            return false;
+        }
+    }
+
     public void createZip(String sourcePath, String zipPath) {
         try {
             Path source = validateZipPath(sourcePath);
+            
+            if (!zipPath.toLowerCase().endsWith(".zip")) {
+                zipPath = zipPath + ".zip";
+            }
+            
             Path zip = validateAndNormalizePath(zipPath);
 
             if (!Files.exists(source)) {
-                throw new IOException("Source directory does not exist: " + sourcePath);
+                throw new IOException("Source path does not exist: " + sourcePath);
+            }
+
+            if (Files.isDirectory(zip)) {
+                String sourceFileName = source.getFileName().toString();
+                zip = zip.resolve(sourceFileName + ".zip");
             }
 
             Path zipParent = zip.getParent();
@@ -493,23 +528,35 @@ public class FilesWrapper {
             }
 
             try (ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(zip))) {
-                Files.walk(source)
-                    .forEach(path -> {
-                        try {
-                            String relativePath = source.relativize(path).toString().replace('\\', '/');
-                            if (Files.isDirectory(path)) {
-                                relativePath += "/";
+                if (Files.isDirectory(source)) {
+                    Files.walk(source)
+                        .forEach(path -> {
+                            try {
+                                String relativePath = source.relativize(path).toString().replace('\\', '/');
+                                if (Files.isDirectory(path)) {
+                                    if (!relativePath.isEmpty()) {
+                                        relativePath += "/";
+                                        zos.putNextEntry(new ZipEntry(relativePath));
+                                        zos.closeEntry();
+                                    }
+                                } else {
+                                    zos.putNextEntry(new ZipEntry(relativePath));
+                                    Files.copy(path, zos);
+                                    zos.closeEntry();
+                                }
+                            } catch (IOException e) {
+                                throw new UncheckedIOException(e);
                             }
-                            zos.putNextEntry(new ZipEntry(relativePath));
-                            if (!Files.isDirectory(path)) {
-                                Files.copy(path, zos);
-                            }
-                            zos.closeEntry();
-                        } catch (IOException e) {
-                            throw new UncheckedIOException(e);
-                        }
-                    });
+                        });
+                } else {
+                    String fileName = source.getFileName().toString();
+                    zos.putNextEntry(new ZipEntry(fileName));
+                    Files.copy(source, zos);
+                    zos.closeEntry();
+                }
             }
+            
+            Filesjs.LOGGER.info("Successfully created zip file: " + zip);
         } catch (IOException | UncheckedIOException e) {
             Filesjs.LOGGER.error("Error creating zip file: " + zipPath, e);
             throw new RuntimeException("Failed to create zip file: " + zipPath, e);
